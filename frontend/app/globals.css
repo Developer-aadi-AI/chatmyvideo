@@ -535,6 +535,37 @@ h1 em {
   margin-top: 24px;
 }
 
+.quick-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 16px;
+}
+
+.quick-action {
+  min-height: 36px;
+  padding: 0 14px;
+  border: 1px solid var(--green);
+  border-radius: 999px;
+  background: #fff;
+  color: var(--green);
+  cursor: pointer;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 700;
+  transition: background 150ms ease, color 150ms ease;
+}
+
+.quick-action:hover:not(:disabled) {
+  background: var(--green);
+  color: #fff;
+}
+
+.quick-action:disabled {
+  cursor: wait;
+  opacity: 0.55;
+}
+
 .conversation {
   display: grid;
   gap: 20px;

@@ -35,6 +35,11 @@ type AskResponse = {
 };
 
 const MAX_HISTORY_MESSAGES = 6;
+// One-click requests; the backend sends these through its whole-video path.
+const QUICK_ACTIONS = [
+  { label: "Summary", question: "Summarize this video" },
+  { label: "Flashcards", question: "Create flashcards for this video" },
+] as const;
 const MAX_HISTORY_CHARS = 4000;
 
 const configuredApiUrl = process.env.NEXT_PUBLIC_API_URL?.trim();
@@ -254,8 +259,11 @@ export default function HomePage() {
 
   async function handleAsk(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (!loadedVideo || !question.trim() || isAsking || !apiUrl) return;
-    const askedQuestion = question.trim();
+    await askQuestion(question.trim(), { clearInput: true });
+  }
+
+  async function askQuestion(askedQuestion: string, { clearInput }: { clearInput: boolean }) {
+    if (!loadedVideo || !askedQuestion || isAsking || !apiUrl) return;
     // The backend accepts at most 20 history messages of 4,000 characters each and only
     // uses the last 6, so send just those; sending everything breaks after 10 questions.
     const history: ChatMessage[] = turns
@@ -291,7 +299,7 @@ export default function HomePage() {
           sources: payload.source_excerpts,
         },
       ]);
-      setQuestion("");
+      if (clearInput) setQuestion("");
     } catch (askError: unknown) {
       setError(
         friendlyRequestError(askError, "We couldn't answer this question. Please try again."),
@@ -478,6 +486,19 @@ export default function HomePage() {
                 )}
 
                 <form className="question-form" onSubmit={handleAsk}>
+                  <div className="quick-actions" role="group" aria-label="Quick actions">
+                    {QUICK_ACTIONS.map((action) => (
+                      <button
+                        className="quick-action"
+                        disabled={isAsking}
+                        key={action.label}
+                        onClick={() => void askQuestion(action.question, { clearInput: false })}
+                        type="button"
+                      >
+                        {action.label}
+                      </button>
+                    ))}
+                  </div>
                   <label htmlFor="video-question">Ask a question</label>
                   <div className="form-row">
                     <input

@@ -15,6 +15,10 @@ _LLM_TIMEOUT_SECONDS = 30.0
 _LLM_MAX_RETRIES = 4
 _LLM_TEMPERATURE = 0.2
 _EMPTY_COMPLETION_ATTEMPTS = 2
+# Output caps (including hidden reasoning) keep answers short and save the free-tier
+# token budget; prompts ask for brief answers, so these are only a safety net.
+_MAX_ANSWER_TOKENS = 1200
+_MAX_BACKGROUND_TOKENS = 700
 
 
 class ChatMessage(TypedDict):
@@ -46,10 +50,12 @@ class GroqProvider:
         model: str,
         *,
         reasoning_effort: str | None = None,
+        max_completion_tokens: int | None = None,
     ) -> None:
         self._client = client
         self.model = model
         self.reasoning_effort = reasoning_effort
+        self.max_completion_tokens = max_completion_tokens
 
     def complete(
         self,
@@ -75,6 +81,8 @@ class GroqProvider:
         extra: dict[str, Any] = {}
         if self.reasoning_effort:
             extra["reasoning_effort"] = self.reasoning_effort
+        if self.max_completion_tokens:
+            extra["max_completion_tokens"] = self.max_completion_tokens
         # Reasoning models occasionally spend their whole output on hidden reasoning and
         # return empty content, so retry once before giving up.
         for attempt in range(1, _EMPTY_COMPLETION_ATTEMPTS + 1):
@@ -119,13 +127,24 @@ def _create_groq_client() -> _GroqClient:
     )
 
 
+def _low_effort_for(model: str) -> str | None:
+    # Low reasoning effort makes gpt-oss answers faster and spends fewer of the
+    # rate-limited tokens on hidden reasoning; other models reject this parameter.
+    return "low" if "gpt-oss" in model else None
+
+
 def get_llm_provider() -> GroqProvider:
     """Create the process-wide Groq client once and reuse it for all calls."""
     global _provider
     if _provider is None:
         with _provider_lock:
             if _provider is None:
-                _provider = GroqProvider(_create_groq_client(), config.LLM_MODEL)
+                _provider = GroqProvider(
+                    _create_groq_client(),
+                    config.LLM_MODEL,
+                    reasoning_effort=_low_effort_for(config.LLM_MODEL),
+                    max_completion_tokens=_MAX_ANSWER_TOKENS,
+                )
     return _provider
 
 
@@ -136,10 +155,10 @@ def get_fast_llm_provider() -> GroqProvider:
         main_provider = get_llm_provider()
         with _provider_lock:
             if _fast_provider is None:
-                # Low reasoning effort keeps background steps fast and uses fewer of the
-                # rate-limited tokens; only gpt-oss models accept this parameter.
-                effort = "low" if "gpt-oss" in config.LLM_FAST_MODEL else None
                 _fast_provider = GroqProvider(
-                    main_provider._client, config.LLM_FAST_MODEL, reasoning_effort=effort
+                    main_provider._client,
+                    config.LLM_FAST_MODEL,
+                    reasoning_effort=_low_effort_for(config.LLM_FAST_MODEL),
+                    max_completion_tokens=_MAX_BACKGROUND_TOKENS,
                 )
     return _fast_provider
