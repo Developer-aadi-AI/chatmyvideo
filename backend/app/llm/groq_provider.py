@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import threading
 from collections.abc import Sequence
 from typing import Any, Protocol, TypedDict
@@ -7,6 +8,7 @@ from typing import Any, Protocol, TypedDict
 from app import config
 from app.agent.language import answer_language_instruction
 
+logger = logging.getLogger(__name__)
 _LLM_TIMEOUT_SECONDS = 30.0
 _LLM_MAX_RETRIES = 2
 _LLM_TEMPERATURE = 0.2
@@ -50,11 +52,7 @@ class GroqProvider:
         completion_messages = list(messages)
         if include_language_instruction:
             language_question = answer_language_question or next(
-                (
-                    message["content"]
-                    for message in reversed(messages)
-                    if message["role"] == "user"
-                ),
+                (message["content"] for message in reversed(messages) if message["role"] == "user"),
                 "",
             )
             completion_messages.append(
@@ -63,11 +61,19 @@ class GroqProvider:
                     content=answer_language_instruction(language_question, transcript_language),
                 )
             )
-        response = self._client.chat.completions.create(
-            model=self.model,
-            messages=completion_messages,
-            temperature=_LLM_TEMPERATURE,
-        )
+        try:
+            response = self._client.chat.completions.create(
+                model=self.model,
+                messages=completion_messages,
+                temperature=_LLM_TEMPERATURE,
+            )
+        except Exception as exc:
+            # Groq SDK errors (rate limits, timeouts, auth) become RuntimeError so the API
+            # returns a readable 503 instead of an unhandled 500 without CORS headers.
+            logger.exception("Groq chat completion failed.")
+            raise RuntimeError(
+                "The answer service is busy or unavailable right now. Please try again shortly."
+            ) from exc
         choices = getattr(response, "choices", None)
         if not choices:
             raise RuntimeError("Groq returned no completion choices.")

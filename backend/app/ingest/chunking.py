@@ -71,9 +71,7 @@ def chunk_transcript(
         if overlap_chars:
             for index in range(end_index - 1, chunk_start_index - 1, -1):
                 segment_length = len(ordered_segments[index].text.strip())
-                new_overlap_length = overlap_length + segment_length + (
-                    1 if overlap_length else 0
-                )
+                new_overlap_length = overlap_length + segment_length + (1 if overlap_length else 0)
                 next_segment_length = len(ordered_segments[end_index].text.strip())
                 combined_length = new_overlap_length + 1 + next_segment_length
                 if combined_length > target_chars:

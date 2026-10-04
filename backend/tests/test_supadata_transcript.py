@@ -219,3 +219,18 @@ def test_transcript_duration_uses_latest_segment_end() -> None:
     )
 
     assert transcript.duration == 5
+
+
+def test_temporary_outage_is_not_cached_so_retry_can_succeed(monkeypatch) -> None:
+    provider = SupadataTranscriptProvider(api_key="test-key")
+    responses = [
+        {"error": "internal-error"},
+        {"lang": "en", "content": [{"text": "Hello", "offset": 0, "duration": 1000}]},
+    ]
+    monkeypatch.setattr(provider, "_request_json", lambda url, **kwargs: responses.pop(0))
+
+    with pytest.raises(TranscriptFetchError) as error:
+        provider.fetch("dQw4w9WgXcQ")
+    assert error.value.status_code == 503
+
+    assert provider.fetch("dQw4w9WgXcQ").segments[0].text == "Hello"

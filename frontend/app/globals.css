@@ -574,6 +574,24 @@ h1 em {
   margin: 0;
 }
 
+.citation-link,
+.source-time-button {
+  padding: 0;
+  border: 0;
+  background: none;
+  font: inherit;
+  cursor: pointer;
+}
+
+.source-time-button {
+  color: var(--green);
+}
+
+.source-time-button:hover {
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
 .citation-link {
   display: inline-block;
   margin: 0 2px;

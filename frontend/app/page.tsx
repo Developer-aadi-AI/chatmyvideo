@@ -1,8 +1,10 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { FormEvent, ReactNode } from "react";
 import Link from "next/link";
+
+import TimestampLink from "@/components/TimestampLink";
 
 type ApiState = "checking" | "online" | "offline" | "unconfigured";
 type ChatRole = "user" | "assistant";
@@ -31,6 +33,9 @@ type AskResponse = {
   source_excerpts: SourceExcerpt[];
 };
 
+const MAX_HISTORY_MESSAGES = 6;
+const MAX_HISTORY_CHARS = 4000;
+
 const configuredApiUrl = process.env.NEXT_PUBLIC_API_URL?.trim();
 const apiUrl = (
   configuredApiUrl ||
@@ -51,6 +56,18 @@ async function responseError(response: Response): Promise<string> {
     typeof payload.detail === "string"
   ) {
     return payload.detail;
+  }
+  // FastAPI validation errors (422) send `detail` as a list of { msg } objects.
+  if (
+    typeof payload === "object" &&
+    payload !== null &&
+    "detail" in payload &&
+    Array.isArray(payload.detail)
+  ) {
+    const first: unknown = payload.detail[0];
+    if (typeof first === "object" && first !== null && "msg" in first && typeof first.msg === "string") {
+      return first.msg.replace(/^Value error, /, "");
+    }
   }
   return `The backend returned an error (${response.status}).`;
 }
@@ -108,8 +125,8 @@ function friendlyRequestError(error: unknown, fallback: string): string {
 
 function renderCitedAnswer(
   answer: string,
-  videoId: string,
   citedTimes: string[],
+  onSeek: (seconds: number) => void,
 ): ReactNode[] {
   const citedSet = new Set(citedTimes);
   return answer.split(/(\[\d+:\d{2}\])/g).map((part, index) => {
@@ -120,16 +137,9 @@ function renderCitedAnswer(
       return <span key={index}>{part}</span>;
     }
     return (
-      <a
-        className="citation-link"
-        href={`https://www.youtube.com/watch?v=${encodeURIComponent(videoId)}&t=${seconds}s`}
-        key={index}
-        rel="noreferrer"
-        target="_blank"
-        title={`Open video at ${timestamp[1]}:${timestamp[2]}`}
-      >
+      <TimestampLink className="citation-link" key={index} onSeek={onSeek} seconds={seconds}>
         {part}
-      </a>
+      </TimestampLink>
     );
   });
 }
@@ -143,6 +153,19 @@ export default function HomePage() {
   const [isLoadingVideo, setIsLoadingVideo] = useState(false);
   const [isAsking, setIsAsking] = useState(false);
   const [error, setError] = useState("");
+  const playerRef = useRef<HTMLIFrameElement>(null);
+
+  // Seek the embedded player through the YouTube IFrame postMessage API (enabled by
+  // `enablejsapi=1` in the embed URL), so no extra script or dependency is needed.
+  function seekTo(seconds: number): void {
+    const player = playerRef.current;
+    if (!player?.contentWindow) return;
+    const send = (func: string, args: unknown[] = []) =>
+      player.contentWindow?.postMessage(JSON.stringify({ event: "command", func, args }), "*");
+    send("seekTo", [seconds, true]);
+    send("playVideo");
+    player.scrollIntoView({ behavior: "smooth", block: "center" });
+  }
 
   useEffect(() => {
     if (!apiUrl) {
@@ -232,10 +255,16 @@ export default function HomePage() {
     event.preventDefault();
     if (!loadedVideo || !question.trim() || isAsking || !apiUrl) return;
     const askedQuestion = question.trim();
-    const history: ChatMessage[] = turns.flatMap((turn) => [
-      { role: "user", content: turn.question },
-      { role: "assistant", content: turn.answer },
-    ]);
+    // The backend accepts at most 20 history messages of 4,000 characters each and only
+    // uses the last 6, so send just those; sending everything breaks after 10 questions.
+    const history: ChatMessage[] = turns
+      .flatMap((turn): ChatMessage[] => [
+        { role: "user", content: turn.question },
+        { role: "assistant", content: turn.answer },
+      ])
+      .filter((message) => message.content.trim())
+      .slice(-MAX_HISTORY_MESSAGES)
+      .map((message) => ({ ...message, content: message.content.slice(-MAX_HISTORY_CHARS) }));
     setIsAsking(true);
     setError("");
     try {
@@ -362,7 +391,12 @@ export default function HomePage() {
                   type="text"
                   value={videoUrl}
                 />
-                <button className="primary-button" disabled={isLoadingVideo} type="submit">
+                {/* Disabled while asking so a late answer can't attach to a newly loaded video. */}
+                <button
+                  className="primary-button"
+                  disabled={isLoadingVideo || isAsking}
+                  type="submit"
+                >
                   {isLoadingVideo ? "Loading captions…" : "Load video"}
                 </button>
               </div>
@@ -395,11 +429,11 @@ export default function HomePage() {
                 </div>
                 <div className="video-player">
                   <iframe
+                    ref={playerRef}
                     allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
                     allowFullScreen
-                    loading="lazy"
                     referrerPolicy="strict-origin-when-cross-origin"
-                    src={`https://www.youtube-nocookie.com/embed/${encodeURIComponent(loadedVideo.videoId)}`}
+                    src={`https://www.youtube-nocookie.com/embed/${encodeURIComponent(loadedVideo.videoId)}?enablejsapi=1&rel=0`}
                     title="YouTube video player"
                   />
                 </div>
@@ -410,22 +444,22 @@ export default function HomePage() {
                       <article className="chat-turn" key={`${index}-${turn.question}`}>
                         <p className="question-bubble">{turn.question}</p>
                         <div className="answer-block">
-                          <p>{renderCitedAnswer(turn.answer, loadedVideo.videoId, turn.citedTimes)}</p>
+                          <p>{renderCitedAnswer(turn.answer, turn.citedTimes, seekTo)}</p>
                           {turn.sources.length > 0 && (
                             <details className="source-list">
                               <summary>Sources ({turn.sources.length})</summary>
                               <ul>
                                 {turn.sources.map((source) => (
                                   <li key={`${source.position}-${source.start}`}>
-                                    <a
-                                      href={`https://www.youtube.com/watch?v=${encodeURIComponent(loadedVideo.videoId)}&t=${Math.floor(source.start)}s`}
-                                      rel="noreferrer"
-                                      target="_blank"
+                                    <TimestampLink
+                                      className="source-time-button"
+                                      onSeek={seekTo}
+                                      seconds={Math.floor(source.start)}
                                     >
                                       <span className="source-time">
                                         {formatTime(source.start)}–{formatTime(source.end)}
                                       </span>
-                                    </a>
+                                    </TimestampLink>
                                     <span>{source.text}</span>
                                   </li>
                                 ))}

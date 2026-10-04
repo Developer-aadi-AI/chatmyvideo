@@ -18,6 +18,8 @@ def _string_setting(name: str, default: str) -> str:
 def _integer_setting(name: str, default: int) -> int:
     value = os.getenv(name)
     if value is None or not value.strip():
+        value = _BACKEND_ENV.get(name)
+    if value is None or not value.strip():
         return default
     try:
         return int(value)
@@ -45,7 +47,7 @@ EMBED_MODEL: str = _backend_setting("EMBED_MODEL", "intfloat/multilingual-e5-lar
 RETRIEVER_K: int = _integer_setting("RETRIEVER_K", 4)
 FULL_CONTEXT_CHAR_LIMIT: int = _integer_setting("FULL_CONTEXT_CHAR_LIMIT", 24000)
 
-FRONTEND_ORIGIN: str = _string_setting("FRONTEND_ORIGIN", "http://localhost:3000")
+FRONTEND_ORIGIN: str = _backend_setting("FRONTEND_ORIGIN", "http://localhost:3000")
 
 
 def check_config() -> list[str]:

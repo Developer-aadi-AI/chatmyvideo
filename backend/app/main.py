@@ -5,7 +5,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field, field_validator
 
 from app.agent.qa import get_question_answer_service
-from app.config import FRONTEND_ORIGIN
+from app.config import FRONTEND_ORIGIN, RETRIEVER_K
 from app.ingest.search import get_video_search_service
 from app.ingest.youtube_url import parse_youtube_video_id
 from app.transcripts.youtube_transcript import TranscriptFetchError, fetch_transcript
@@ -24,7 +24,7 @@ class ChatHistoryMessage(BaseModel):
 
 class AskVideoRequest(BaseModel):
     question: str = Field(min_length=1, max_length=2000)
-    limit: int = Field(default=5, ge=1, le=20)
+    limit: int = Field(default=RETRIEVER_K, ge=1, le=20)
     history: list[ChatHistoryMessage] = Field(default_factory=list, max_length=20)
 
     @field_validator("question")
@@ -75,6 +75,8 @@ def index_video(request: IndexVideoRequest) -> dict[str, str | bool]:
         raise HTTPException(status_code=exc.status_code, detail=str(exc)) from exc
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
 
     return {
         "video_id": parse_youtube_video_id(request.url),

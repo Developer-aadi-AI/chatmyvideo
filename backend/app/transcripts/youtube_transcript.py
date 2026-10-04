@@ -86,8 +86,11 @@ class SupadataTranscriptProvider:
             try:
                 transcript = self._fetch_uncached(video_id)
             except TranscriptFetchError as exc:
-                with _TRANSCRIPT_CACHE_LOCK:
-                    _TRANSCRIPT_CACHE[video_id] = exc
+                # Outages and timeouts (5xx) are temporary, so let the user retry them;
+                # cache only lasting failures such as missing captions or quota limits.
+                if exc.status_code < 500:
+                    with _TRANSCRIPT_CACHE_LOCK:
+                        _TRANSCRIPT_CACHE[video_id] = exc
                 raise
             with _TRANSCRIPT_CACHE_LOCK:
                 _TRANSCRIPT_CACHE[video_id] = transcript
@@ -188,9 +191,7 @@ class SupadataTranscriptProvider:
         status_code: int | None = None,
     ) -> NoReturn:
         code = str(payload.get("error", "")).lower()
-        details = " ".join(
-            str(payload.get(key, "")) for key in ("message", "details")
-        ).lower()
+        details = " ".join(str(payload.get(key, "")) for key in ("message", "details")).lower()
         upstream_status = status_code or 0
 
         if upstream_status == 401 or code == "unauthorized":

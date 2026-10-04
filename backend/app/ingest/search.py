@@ -172,10 +172,7 @@ def _is_near_duplicate(first: str, second: str) -> bool:
     second_tokens = second.lower().split()
     if not first_tokens or not second_tokens:
         return False
-    return (
-        SequenceMatcher(None, first_tokens, second_tokens).ratio()
-        >= _NEAR_DUPLICATE_THRESHOLD
-    )
+    return SequenceMatcher(None, first_tokens, second_tokens).ratio() >= _NEAR_DUPLICATE_THRESHOLD
 
 
 _video_search_service = VideoSearchService()

@@ -49,8 +49,10 @@ class VideoChatEngine:
             video_id = parse_youtube_video_id(link)
         except Exception as exc:
             logger.exception("Rejected invalid video link.")
-            message = str(exc) if isinstance(exc, ValueError) else (
-                "Please provide a valid YouTube video link or video ID."
+            message = (
+                str(exc)
+                if isinstance(exc, ValueError)
+                else ("Please provide a valid YouTube video link or video ID.")
             )
             raise EngineError(message) from exc
 
@@ -84,9 +86,7 @@ class VideoChatEngine:
             raise EngineError("Please enter a question.")
         if len(question) > MAX_QUESTION_CHARS:
             logger.warning("Rejected a question exceeding the maximum length.")
-            raise EngineError(
-                f"Questions must be {MAX_QUESTION_CHARS:,} characters or fewer."
-            )
+            raise EngineError(f"Questions must be {MAX_QUESTION_CHARS:,} characters or fewer.")
         if history is not None and (
             not isinstance(history, Sequence)
             or isinstance(history, (str, bytes))

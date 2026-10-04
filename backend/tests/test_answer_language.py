@@ -36,9 +36,7 @@ def test_detects_supported_question_languages(question: str, expected_language: 
 def test_hinglish_is_not_misidentified_as_another_latin_language() -> None:
     question = "ye video kis baare mein hai"
 
-    assert detect_question_language(question, "fr") == (
-        "Hinglish (Hindi written in Latin script)"
-    )
+    assert detect_question_language(question, "fr") == ("Hinglish (Hindi written in Latin script)")
 
 
 @pytest.mark.parametrize(

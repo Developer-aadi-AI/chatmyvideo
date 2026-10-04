@@ -109,9 +109,8 @@ def _parse_question(video_id: str, raw: Any) -> EvaluationQuestion:
     if not isinstance(off_topic, bool):
         raise TypeError(f"Question {question_id} must set off_topic to true or false.")
     expected_points = raw.get("expected_points")
-    if (
-        not isinstance(expected_points, list)
-        or any(not isinstance(point, str) or not point.strip() for point in expected_points)
+    if not isinstance(expected_points, list) or any(
+        not isinstance(point, str) or not point.strip() for point in expected_points
     ):
         raise TypeError(f"Question {question_id} must have a list of expected_points.")
     expected_time = raw.get("expected_time_seconds")
@@ -434,12 +433,8 @@ def main() -> int:
             print(f"Video load failed: {run['video_error']}", file=sys.stderr)
             print(f"Saved failed run to {args.results}")
             return 1
-        complete = sum(
-            result["status"] == "complete" for result in run["question_results"]
-        )
-        print(
-            f"Saved {complete}/{len(video.questions)} question results to {args.results}"
-        )
+        complete = sum(result["status"] == "complete" for result in run["question_results"])
+        print(f"Saved {complete}/{len(video.questions)} question results to {args.results}")
     return 0
 
 

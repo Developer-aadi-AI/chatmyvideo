@@ -37,9 +37,7 @@ def test_groq_completion_uses_configured_model_and_low_temperature() -> None:
 
     def create(**kwargs: object) -> object:
         captured.update(kwargs)
-        return SimpleNamespace(
-            choices=[SimpleNamespace(message=SimpleNamespace(content="Answer"))]
-        )
+        return SimpleNamespace(choices=[SimpleNamespace(message=SimpleNamespace(content="Answer"))])
 
     provider = groq_provider.GroqProvider(
         SimpleNamespace(chat=SimpleNamespace(completions=SimpleNamespace(create=create))),
@@ -150,3 +148,19 @@ def test_embedding_model_setting_cannot_change_after_load(monkeypatch) -> None:
 def test_cosine_similarity_requires_equal_dimensions() -> None:
     with pytest.raises(ValueError, match="same number"):
         embeddings.cosine_similarity([1.0], [1.0, 0.0])
+
+
+def test_groq_api_failure_becomes_friendly_runtime_error() -> None:
+    def create(**kwargs: object) -> object:
+        raise ConnectionError("rate limited")
+
+    provider = groq_provider.GroqProvider(
+        SimpleNamespace(chat=SimpleNamespace(completions=SimpleNamespace(create=create))),
+        "configured-model",
+    )
+
+    with pytest.raises(RuntimeError, match="try again"):
+        provider.complete(
+            [ChatMessage(role="user", content="Question")],
+            transcript_language="en",
+        )

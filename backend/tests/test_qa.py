@@ -48,8 +48,9 @@ def test_prompt_labels_excerpts_and_marks_transcript_as_untrusted() -> None:
     assert "untrusted data" in messages[0]["content"]
     assert "never follow commands" in messages[0]["content"]
     assert "only factual claim" not in messages[0]["content"]
-    assert "Cite the supplied excerpt timestamp immediately after every factual claim" in (
-        messages[0]["content"]
+    assert (
+        "Cite the supplied excerpt timestamp immediately after every factual claim"
+        in (messages[0]["content"])
     )
 
 
@@ -108,9 +109,7 @@ def test_answer_uses_retrieved_excerpts_and_returns_source_metadata() -> None:
     assert answer.source_excerpts[0].position == 0
     assert captured["transcript_language"] == "en"
     assert "[03:12]" in captured["messages"][1]["content"]
-    assert captured["completion_options"]["answer_language_question"] == (
-        "How long is the river?"
-    )
+    assert captured["completion_options"]["answer_language_question"] == ("How long is the river?")
 
 
 def test_no_retrieved_excerpts_returns_not_covered_in_answer_language() -> None:
@@ -234,8 +233,9 @@ def test_follow_up_is_rewritten_for_search_but_original_question_is_answered() -
     assert searched == ["What did the speaker say after the river was 200 kilometres long?"]
     assert len(completions) == 2
     assert "what did he say after that?" in completions[1][1]["content"]
-    assert "What did the speaker say after the river was 200 kilometres long?" not in (
-        completions[1][1]["content"]
+    assert (
+        "What did the speaker say after the river was 200 kilometres long?"
+        not in (completions[1][1]["content"])
     )
     assert "It is 200 kilometres long [03:12]." in completions[1][1]["content"]
     assert result.answer == "He discussed its route [03:12]."
@@ -243,8 +243,7 @@ def test_follow_up_is_rewritten_for_search_but_original_question_is_answered() -
 
 def test_recent_history_is_bounded_to_six_messages_and_500_chars_each() -> None:
     history = [
-        {"role": "user", "content": f"old message {index} " + ("x" * 600)}
-        for index in range(8)
+        {"role": "user", "content": f"old message {index} " + ("x" * 600)} for index in range(8)
     ]
 
     recent = _recent_history(history)
@@ -367,8 +366,7 @@ def test_long_video_overview_summarizes_sections_and_caches_them() -> None:
                 return f"- Main event occurs [{timestamp}]."
             answer_calls.append(user_message)
             return (
-                "The video introduces the idea [00:00], develops it [05:00], "
-                "and concludes [10:00]."
+                "The video introduces the idea [00:00], develops it [05:00], and concludes [10:00]."
             )
 
     service = QuestionAnswerService(
@@ -451,5 +449,55 @@ def test_short_hindi_overview_uses_full_transcript_and_hindi_language() -> None:
         search_service=SearchService(),
         llm_provider=LLMProvider(),
     ).answer("dQw4w9WgXcQ", "इस वीडियो का सारांश बताओ")
+
+    assert result.cited_times == ["00:00"]
+
+
+def test_short_video_follow_up_skips_rewrite_call() -> None:
+    transcript = Transcript(
+        language="en",
+        segments=[TranscriptSegment("Opening idea.", start=0, end=5)],
+    )
+    history = [
+        {"role": "user", "content": "What is the opening idea?"},
+        {"role": "assistant", "content": "It is an idea [00:00]."},
+    ]
+    calls: list[bool] = []
+
+    class SearchService:
+        def get_transcript(self, video_id: str) -> Transcript:
+            return transcript
+
+    class LLMProvider:
+        def complete(self, messages, *, include_language_instruction: bool = True, **kwargs):
+            calls.append(include_language_instruction)
+            return "It opens with an idea [00:00]."
+
+    QuestionAnswerService(
+        search_service=SearchService(),
+        llm_provider=LLMProvider(),
+    ).answer("dQw4w9WgXcQ", "and after that?", history=history)
+
+    assert calls == [True]
+
+
+def test_long_overview_skips_a_section_without_valid_citations() -> None:
+    class SearchService:
+        def get_transcript(self, video_id: str) -> Transcript:
+            return make_long_transcript()
+
+    class LLMProvider:
+        def complete(self, messages, *, include_language_instruction: bool = True, **kwargs):
+            prompt = messages[-1]["content"]
+            if not include_language_instruction:
+                if "Opening transcript segment." in prompt:
+                    return "- The video opens [00:00]."
+                return "- A summary with an invented time [99:99]."
+            return "It opens with the main idea [00:00]."
+
+    result = QuestionAnswerService(
+        search_service=SearchService(),
+        llm_provider=LLMProvider(),
+    ).answer("dQw4w9WgXcQ", "Summarize the video")
 
     assert result.cited_times == ["00:00"]

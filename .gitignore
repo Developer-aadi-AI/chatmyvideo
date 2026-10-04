@@ -17,3 +17,5 @@ backend/eval-results/
 
 .vercel/
 .railway/
+
+*.tsbuildinfo

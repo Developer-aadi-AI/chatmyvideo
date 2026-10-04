@@ -36,12 +36,14 @@ I'm an intermediate developer: I can read and tweak code and debug simple issues
 | Frontend | Next.js (App Router), TypeScript, Tailwind CSS |
 | Video player | YouTube IFrame Player API (embedded, for seeking to timestamps) |
 | Backend / agent | Python 3.12, FastAPI, Pydantic v2 |
-| LLM access | Our own provider layer (see below), Anthropic + OpenAI SDKs |
-| Transcripts | `youtube-transcript-api`, behind a `TranscriptProvider` interface |
-| Video metadata | YouTube Data API v3 (title, channel, duration, thumbnail) |
-| Embeddings + search | Supabase Postgres with `pgvector` |
-| Auth | Supabase Auth (Google sign-in + email magic link) |
-| Observability | Langfuse for LLM traces |
+| LLM access | Groq (free tier) via `backend/app/llm/groq_provider.py`; default model `openai/gpt-oss-120b`. Stay on Groq; do not switch to paid providers. |
+| Transcripts | Supadata API (existing captions only, `mode=native`), behind a `TranscriptProvider` interface |
+| Embeddings | Local `sentence-transformers` model `intfloat/multilingual-e5-large` (or `-small`), downloaded from Hugging Face |
+| Search | In-memory FAISS index per video (cleared on backend restart) |
+| Video metadata | *Planned:* YouTube Data API v3 (title, channel, duration, thumbnail) |
+| Database | *Planned:* Supabase Postgres with `pgvector` |
+| Auth | *Planned:* Supabase Auth (Google sign-in + email magic link) |
+| Observability | *Planned:* Langfuse for LLM traces |
 | Deploy | Frontend on Vercel, backend on Railway |
 | Python tooling | `uv`, `ruff`, `pytest` |
 | JS tooling | `pnpm`, ESLint, Prettier |
@@ -71,13 +73,12 @@ README.md
 ```
 
 ## LLM provider layer
-The app must be able to switch chat models without touching feature code.
-- One interface in `backend/app/llm/base.py`: `LLMProvider.chat(messages, tools, model) -> LLMResponse`, with streaming support.
-- Adapters in `llm/anthropic_provider.py` and `llm/openai_provider.py` convert to and from each SDK's message and tool-call format.
-- Feature code imports only from `llm/base.py`, never a vendor SDK directly.
-- Env vars: `LLM_PROVIDER`, `LLM_MODEL` (chat answers), `LLM_FAST_MODEL` (summaries of chunks, cheap tasks).
-- **Embeddings are separate and fixed**: one `EMBEDDING_MODEL` for the whole database. Changing it means re-embedding every video, so never change it casually; store the model name on each chunk row.
-- Normalize token usage into one shape so cost tracking works for every provider.
+Current implementation (keep it):
+- Chat goes through `GroqProvider.complete(messages, transcript_language=...)` in `backend/app/llm/groq_provider.py`. It uses one shared client (30 s timeout, 2 retries, temperature 0.2) and appends an answer-language instruction.
+- Groq SDK failures (rate limits, timeouts) are re-raised as `RuntimeError` with a friendly message; routes turn them into HTTP 503.
+- Env var: `LLM_MODEL` (any Groq-hosted model id).
+- **Embeddings are separate and fixed**: `EMBED_MODEL` is loaded once per process in `backend/app/embeddings/provider.py`, with E5 `passage:`/`query:` prefixes. Changing it requires re-indexing every video and restarting the backend.
+- `backend/app/llm/base.py`, `anthropic_provider.py` and `openai_provider.py` are empty placeholders and are not used.
 
 ## Ingestion pipeline
 Triggered by `POST /videos` with a URL.
@@ -174,30 +175,18 @@ pnpm lint && pnpm build
 ```
 
 ## Environment variables
-Backend (`backend/.env`, mirrored in Railway):
+Backend (`backend/.env`, mirrored in Railway). These are the variables the code reads today (`backend/app/config.py`):
 ```
-LLM_PROVIDER=anthropic           # or openai
-LLM_MODEL=
-LLM_FAST_MODEL=
-EMBEDDING_PROVIDER=openai
-EMBEDDING_MODEL=
-ANTHROPIC_API_KEY=
-OPENAI_API_KEY=
-YOUTUBE_API_KEY=
-TRANSCRIPT_PROXY_URL=            # optional
-SUPABASE_URL=
-SUPABASE_SERVICE_ROLE_KEY=
-SUPABASE_JWT_SECRET=
-LANGFUSE_PUBLIC_KEY=
-LANGFUSE_SECRET_KEY=
-FULL_CONTEXT_TOKEN_LIMIT=30000
-MAX_TOKENS_PER_QUESTION=40000
-MAX_VIDEO_MINUTES=120
-DAILY_NEW_VIDEOS_PER_USER=5
-DAILY_MESSAGES_PER_USER=50
-GLOBAL_DAILY_SPEND_LIMIT_USD=10
-FRONTEND_ORIGIN=http://localhost:3000
+GROQ_API_KEY=                    # required
+HF_TOKEN=                        # required (Hugging Face model download)
+SUPADATA_API_KEY=                # required (transcripts)
+LLM_MODEL=openai/gpt-oss-120b
+EMBED_MODEL=intfloat/multilingual-e5-large   # or intfloat/multilingual-e5-small to save memory
+RETRIEVER_K=4                    # excerpts retrieved per question on long videos
+FULL_CONTEXT_CHAR_LIMIT=24000    # videos <=10 min and under this many transcript characters use the full transcript
+FRONTEND_ORIGIN=http://localhost:3000        # set to the Vercel URL in Railway (CORS)
 ```
+Planned variables (not read yet): YouTube, Supabase, Langfuse keys and the usage limits listed above.
 Frontend (`frontend/.env.local`, mirrored in Vercel):
 ```
 NEXT_PUBLIC_SUPABASE_URL=

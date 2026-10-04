@@ -99,7 +99,9 @@ _LATIN_MARKERS: dict[str, frozenset[str]] = {
             "funciona",
         }
     ),
-    "fr": frozenset({"le", "les", "des", "est", "pas", "pour", "avec", "que", "comment", "pourquoi"}),
+    "fr": frozenset(
+        {"le", "les", "des", "est", "pas", "pour", "avec", "que", "comment", "pourquoi"}
+    ),
     "id": frozenset({"yang", "dan", "ini", "itu", "adalah", "untuk", "dengan", "bagaimana"}),
     "it": frozenset({"il", "lo", "gli", "che", "come", "perché", "non", "una", "sono"}),
     "nl": frozenset({"het", "een", "is", "niet", "voor", "waarom", "hoe", "deze"}),
@@ -155,11 +157,7 @@ def normalize_language(language: str) -> str:
 
 def _normalize_word(word: str) -> str:
     decomposed = unicodedata.normalize("NFKD", word.casefold())
-    return "".join(
-        character
-        for character in decomposed
-        if unicodedata.category(character) != "Mn"
-    )
+    return "".join(character for character in decomposed if unicodedata.category(character) != "Mn")
 
 
 def _script_language(text: str) -> str | None:

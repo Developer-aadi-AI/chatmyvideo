@@ -104,7 +104,9 @@ def test_unexpected_question_failure_is_logged_and_wrapped(caplog) -> None:
     with caplog.at_level(logging.ERROR), pytest.raises(EngineError) as raised:
         engine.ask("What happened?")
 
-    assert str(raised.value) == "We couldn't answer that question right now. Please try again later."
+    assert (
+        str(raised.value) == "We couldn't answer that question right now. Please try again later."
+    )
     assert raised.value.__cause__ is failure
     assert "upstream connection refused" in caplog.text
 
