@@ -84,7 +84,7 @@ def test_groq_client_uses_timeout_and_retries(monkeypatch) -> None:
     groq_provider._create_groq_client()
 
     assert captured["timeout"] > 0
-    assert captured["max_retries"] == 2
+    assert captured["max_retries"] == 4
     assert captured["api_key"] == "test-key"
 
 
@@ -245,3 +245,25 @@ def test_hf_api_rejected_token_is_a_friendly_runtime_error(monkeypatch) -> None:
 
     with pytest.raises(RuntimeError, match="temporarily unavailable"):
         embeddings.embed_documents(["text"])
+
+
+def test_empty_completion_is_retried_once() -> None:
+    contents = ["", "Answer"]
+    captured: dict[str, object] = {}
+
+    def create(**kwargs: object) -> object:
+        captured.update(kwargs)
+        return SimpleNamespace(
+            choices=[SimpleNamespace(message=SimpleNamespace(content=contents.pop(0)))]
+        )
+
+    provider = groq_provider.GroqProvider(
+        SimpleNamespace(chat=SimpleNamespace(completions=SimpleNamespace(create=create))),
+        "openai/gpt-oss-20b",
+        reasoning_effort="low",
+    )
+
+    assert provider.complete([ChatMessage(role="user", content="Q")], transcript_language="en") == (
+        "Answer"
+    )
+    assert captured["reasoning_effort"] == "low"

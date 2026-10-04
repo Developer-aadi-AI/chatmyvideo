@@ -10,8 +10,11 @@ from app.agent.language import answer_language_instruction
 
 logger = logging.getLogger(__name__)
 _LLM_TIMEOUT_SECONDS = 30.0
-_LLM_MAX_RETRIES = 2
+# Groq's free tier allows only ~8,000 tokens per minute per model; the SDK honours
+# the retry-after hint, so a few retries ride out short rate-limit windows.
+_LLM_MAX_RETRIES = 4
 _LLM_TEMPERATURE = 0.2
+_EMPTY_COMPLETION_ATTEMPTS = 2
 
 
 class ChatMessage(TypedDict):
@@ -32,13 +35,21 @@ class _GroqClient(Protocol):
 
 
 _provider: GroqProvider | None = None
+_fast_provider: GroqProvider | None = None
 _provider_lock = threading.Lock()
 
 
 class GroqProvider:
-    def __init__(self, client: _GroqClient, model: str) -> None:
+    def __init__(
+        self,
+        client: _GroqClient,
+        model: str,
+        *,
+        reasoning_effort: str | None = None,
+    ) -> None:
         self._client = client
         self.model = model
+        self.reasoning_effort = reasoning_effort
 
     def complete(
         self,
@@ -61,28 +72,38 @@ class GroqProvider:
                     content=answer_language_instruction(language_question, transcript_language),
                 )
             )
-        try:
-            response = self._client.chat.completions.create(
-                model=self.model,
-                messages=completion_messages,
-                temperature=_LLM_TEMPERATURE,
+        extra: dict[str, Any] = {}
+        if self.reasoning_effort:
+            extra["reasoning_effort"] = self.reasoning_effort
+        # Reasoning models occasionally spend their whole output on hidden reasoning and
+        # return empty content, so retry once before giving up.
+        for attempt in range(1, _EMPTY_COMPLETION_ATTEMPTS + 1):
+            try:
+                response = self._client.chat.completions.create(
+                    model=self.model,
+                    messages=completion_messages,
+                    temperature=_LLM_TEMPERATURE,
+                    **extra,
+                )
+            except Exception as exc:
+                # Groq SDK errors (rate limits, timeouts, auth) become RuntimeError so the API
+                # returns a readable 503 instead of an unhandled 500 without CORS headers.
+                logger.exception("Groq chat completion failed.")
+                raise RuntimeError(
+                    "The answer service is busy or unavailable right now. Please try again shortly."
+                ) from exc
+            choices = getattr(response, "choices", None)
+            if not choices:
+                raise RuntimeError("Groq returned no completion choices.")
+            content = getattr(getattr(choices[0], "message", None), "content", None)
+            if isinstance(content, str) and content.strip():
+                return content
+            logger.warning(
+                "Groq model %s returned empty content (attempt %d).", self.model, attempt
             )
-        except Exception as exc:
-            # Groq SDK errors (rate limits, timeouts, auth) become RuntimeError so the API
-            # returns a readable 503 instead of an unhandled 500 without CORS headers.
-            logger.exception("Groq chat completion failed.")
-            raise RuntimeError(
-                "The answer service is busy or unavailable right now. Please try again shortly."
-            ) from exc
-        choices = getattr(response, "choices", None)
-        if not choices:
-            raise RuntimeError("Groq returned no completion choices.")
-        content = getattr(getattr(choices[0], "message", None), "content", None)
-        if not isinstance(content, str):
-            raise TypeError("Groq returned a completion with invalid content.")
-        if not content:
-            raise RuntimeError("Groq returned an empty completion.")
-        return content
+        raise RuntimeError(
+            "The answer service returned an empty response. Please try again shortly."
+        )
 
 
 def _create_groq_client() -> _GroqClient:
@@ -106,3 +127,19 @@ def get_llm_provider() -> GroqProvider:
             if _provider is None:
                 _provider = GroqProvider(_create_groq_client(), config.LLM_MODEL)
     return _provider
+
+
+def get_fast_llm_provider() -> GroqProvider:
+    """Return a provider for LLM_FAST_MODEL that shares the process-wide Groq client."""
+    global _fast_provider
+    if _fast_provider is None:
+        main_provider = get_llm_provider()
+        with _provider_lock:
+            if _fast_provider is None:
+                # Low reasoning effort keeps background steps fast and uses fewer of the
+                # rate-limited tokens; only gpt-oss models accept this parameter.
+                effort = "low" if "gpt-oss" in config.LLM_FAST_MODEL else None
+                _fast_provider = GroqProvider(
+                    main_provider._client, config.LLM_FAST_MODEL, reasoning_effort=effort
+                )
+    return _fast_provider

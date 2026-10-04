@@ -76,7 +76,7 @@ README.md
 Current implementation (keep it):
 - Chat goes through `GroqProvider.complete(messages, transcript_language=...)` in `backend/app/llm/groq_provider.py`. It uses one shared client (30 s timeout, 2 retries, temperature 0.2) and appends an answer-language instruction.
 - Groq SDK failures (rate limits, timeouts) are re-raised as `RuntimeError` with a friendly message; routes turn them into HTTP 503.
-- Env var: `LLM_MODEL` (any Groq-hosted model id).
+- Env vars: `LLM_MODEL` (final answers) and `LLM_FAST_MODEL` (section summaries, follow-up rewrites; gpt-oss models run with `reasoning_effort=low`). Groq's free tier allows ~8,000 tokens/minute **per model**, so splitting work across two models avoids rate-limit errors on long-video summaries.
 - **Embeddings are separate and fixed**: `EMBED_MODEL` is loaded once per process in `backend/app/embeddings/provider.py`, with E5 `passage:`/`query:` prefixes. Changing it requires re-indexing every video and restarting the backend.
 - `backend/app/llm/base.py`, `anthropic_provider.py` and `openai_provider.py` are empty placeholders and are not used.
 
@@ -181,6 +181,7 @@ GROQ_API_KEY=                    # required
 HF_TOKEN=                        # required; needs the "Make calls to Inference Providers" permission
 SUPADATA_API_KEY=                # required (transcripts)
 LLM_MODEL=openai/gpt-oss-120b
+LLM_FAST_MODEL=openai/gpt-oss-20b   # section summaries + follow-up rewrites (separate Groq rate limit)
 EMBED_PROVIDER=huggingface       # or local (needs ~1.1 GB RAM)
 EMBED_MODEL=intfloat/multilingual-e5-small
 RETRIEVER_K=4                    # excerpts retrieved per question on long videos

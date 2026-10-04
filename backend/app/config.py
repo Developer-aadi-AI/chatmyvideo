@@ -43,6 +43,9 @@ HF_TOKEN: str = _backend_setting("HF_TOKEN")
 SUPADATA_API_KEY: str = _supadata_api_key_setting()
 
 LLM_MODEL: str = _backend_setting("LLM_MODEL", "openai/gpt-oss-120b")
+# Used for background steps (section summaries, follow-up rewrites). Groq rate limits
+# are per model, so this spreads the free-tier token budget across two models.
+LLM_FAST_MODEL: str = _backend_setting("LLM_FAST_MODEL", "openai/gpt-oss-20b")
 EMBED_MODEL: str = _backend_setting("EMBED_MODEL", "intfloat/multilingual-e5-small")
 # "huggingface" calls the HF Inference API (tiny memory, needs an HF_TOKEN with the
 # "Make calls to Inference Providers" permission); "local" runs the model in-process

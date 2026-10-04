@@ -9,7 +9,12 @@ from dataclasses import dataclass
 from app.agent.language import answer_language_instruction, detect_question_language
 from app.config import FULL_CONTEXT_CHAR_LIMIT, RETRIEVER_K
 from app.ingest.search import SearchResult, VideoSearchService, get_video_search_service
-from app.llm.groq_provider import ChatMessage, GroqProvider, get_llm_provider
+from app.llm.groq_provider import (
+    ChatMessage,
+    GroqProvider,
+    get_fast_llm_provider,
+    get_llm_provider,
+)
 from app.transcripts.base import Transcript, TranscriptSegment
 
 logger = logging.getLogger(__name__)
@@ -180,11 +185,12 @@ def _build_overview_messages(
         ChatMessage(
             role="user",
             content=(
-                f"{answer_language_instruction(question, transcript_language)}\n\n"
                 f"Recent conversation for context (not evidence):\n"
                 f"{history_text or '[No prior conversation.]'}\n\n"
-                f"Original question:\n{question}\n\n"
-                f"Timestamped section summaries:\n{summaries_text}"
+                f"Timestamped section summaries:\n{summaries_text}\n\n"
+                f"{answer_language_instruction(question, transcript_language)}\n\n"
+                # The request goes last so a long history cannot bury it.
+                f"The user's request (answer this now):\n{question}"
             ),
         ),
     ]
@@ -275,6 +281,11 @@ class QuestionAnswerService:
         self._summary_locks: dict[tuple[str, int], threading.Lock] = {}
         self._summary_lock = threading.Lock()
 
+    def _fast_provider(self) -> GroqProvider:
+        # Background steps use the fast model, which has its own Groq rate limit. An
+        # injected provider (tests, custom setups) is used for every step instead.
+        return self._llm_provider or get_fast_llm_provider()
+
     def answer(
         self,
         video_id: str,
@@ -317,11 +328,10 @@ class QuestionAnswerService:
         # answer from the whole transcript, so rewriting there would waste an LLM call.
         search_question = question
         if recent_history:
-            llm_provider = llm_provider or get_llm_provider()
             search_question = rewrite_follow_up_question(
                 question,
                 recent_history,
-                llm_provider=llm_provider,
+                llm_provider=self._fast_provider(),
                 transcript_language=transcript.language,
             )
 
@@ -386,7 +396,7 @@ class QuestionAnswerService:
         summarized_spans: list[tuple[float, float]] = []
         for index, section in enumerate(sections):
             summary = self._summarize_section(
-                video_id, index, section, transcript.language, llm_provider
+                video_id, index, section, transcript.language, self._fast_provider()
             )
             if summary is not None:
                 summaries.append(summary)
