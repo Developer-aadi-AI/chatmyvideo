@@ -14,6 +14,8 @@ from app.transcripts.base import Transcript, TranscriptSegment
 
 logger = logging.getLogger(__name__)
 _TIMESTAMP_PATTERN = re.compile(r"\[(\d+:\d{2})\]")
+# Some models (e.g. gpt-oss on Groq) cite with full-width brackets like 【00:05】.
+_ALT_BRACKET_TIMESTAMP_PATTERN = re.compile(r"[【［]\s*(\d+:\d{2})\s*[】］]")
 _WHITESPACE_PATTERN = re.compile(r"[ \t]{2,}")
 _SPACE_BEFORE_PUNCTUATION_PATTERN = re.compile(r"\s+([,.!?;:])")
 _EMPTY_PARENS_PATTERN = re.compile(r"\(\s*\)")
@@ -211,6 +213,7 @@ def _validate_citations(answer: str, allowed_times: set[str]) -> tuple[str, list
             cited_times.append(timestamp)
         return match.group(0)
 
+    answer = _ALT_BRACKET_TIMESTAMP_PATTERN.sub(r"[\1]", answer)
     cleaned_answer = _TIMESTAMP_PATTERN.sub(replace_citation, answer)
     cleaned_answer = _SPACE_BEFORE_PUNCTUATION_PATTERN.sub(r"\1", cleaned_answer)
     cleaned_answer = _EMPTY_PARENS_PATTERN.sub("", cleaned_answer)

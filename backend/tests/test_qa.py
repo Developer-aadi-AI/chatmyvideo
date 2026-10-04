@@ -501,3 +501,13 @@ def test_long_overview_skips_a_section_without_valid_citations() -> None:
     ).answer("dQw4w9WgXcQ", "Summarize the video")
 
     assert result.cited_times == ["00:00"]
+
+
+def test_validation_normalizes_full_width_bracket_citations() -> None:
+    answer, cited_times = validate_citations(
+        "They have very long trunks【03:12】.",
+        [make_result()],
+    )
+
+    assert answer == "They have very long trunks[03:12]."
+    assert cited_times == ["03:12"]
