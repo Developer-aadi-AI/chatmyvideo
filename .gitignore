@@ -2,7 +2,6 @@
 .env.*
 !.env.example
 !.env.*.example
-
 node_modules/
 .next/
 out/
@@ -14,6 +13,7 @@ __pycache__/
 *.py[cod]
 .pytest_cache/
 .ruff_cache/
+backend/eval-results/
 
 .vercel/
 .railway/

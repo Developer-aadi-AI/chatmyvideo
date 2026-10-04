@@ -1,0 +1,1 @@
+"""Local text embedding helpers."""

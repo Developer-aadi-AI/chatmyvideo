@@ -1,19 +1,154 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import type { FormEvent, ReactNode } from "react";
 import Link from "next/link";
 
-type ApiState = "checking" | "online" | "offline";
+type ApiState = "checking" | "online" | "offline" | "unconfigured";
+type ChatRole = "user" | "assistant";
+type ChatMessage = { role: ChatRole; content: string };
+type SourceExcerpt = {
+  text: string;
+  start: number;
+  end: number;
+  position: number;
+};
+type ChatTurn = {
+  question: string;
+  answer: string;
+  citedTimes: string[];
+  sources: SourceExcerpt[];
+};
+type LoadedVideo = {
+  videoId: string;
+  url: string;
+  indexed: boolean;
+};
+type IndexResponse = { video_id: string; indexed: boolean };
+type AskResponse = {
+  answer: string;
+  cited_times: string[];
+  source_excerpts: SourceExcerpt[];
+};
 
-const apiUrl = (process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000").replace(
-  /\/$/,
-  "",
-);
+const configuredApiUrl = process.env.NEXT_PUBLIC_API_URL?.trim();
+const apiUrl = (
+  configuredApiUrl ||
+  (process.env.NODE_ENV === "development" ? "http://localhost:8000" : "")
+).replace(/\/+$/, "");
+
+async function responseError(response: Response): Promise<string> {
+  let payload: unknown;
+  try {
+    payload = await response.json();
+  } catch {
+    return `The backend returned an error (${response.status}).`;
+  }
+  if (
+    typeof payload === "object" &&
+    payload !== null &&
+    "detail" in payload &&
+    typeof payload.detail === "string"
+  ) {
+    return payload.detail;
+  }
+  return `The backend returned an error (${response.status}).`;
+}
+
+function isIndexResponse(value: unknown): value is IndexResponse {
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    "video_id" in value &&
+    typeof value.video_id === "string" &&
+    "indexed" in value &&
+    typeof value.indexed === "boolean"
+  );
+}
+
+function isAskResponse(value: unknown): value is AskResponse {
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    "answer" in value &&
+    typeof value.answer === "string" &&
+    "cited_times" in value &&
+    Array.isArray(value.cited_times) &&
+    value.cited_times.every((time) => typeof time === "string") &&
+    "source_excerpts" in value &&
+    Array.isArray(value.source_excerpts) &&
+    value.source_excerpts.every(
+      (source) =>
+        typeof source === "object" &&
+        source !== null &&
+        "text" in source &&
+        typeof source.text === "string" &&
+        "start" in source &&
+        typeof source.start === "number" &&
+        "end" in source &&
+        typeof source.end === "number" &&
+        "position" in source &&
+        typeof source.position === "number",
+    )
+  );
+}
+
+function formatTime(seconds: number): string {
+  const safeSeconds = Math.max(0, Math.floor(seconds));
+  const minutes = Math.floor(safeSeconds / 60);
+  return `${String(minutes).padStart(2, "0")}:${String(safeSeconds % 60).padStart(2, "0")}`;
+}
+
+function friendlyRequestError(error: unknown, fallback: string): string {
+  if (error instanceof TypeError) {
+    return "We couldn't reach the backend. Check that it is running and that the Vercel API URL is configured.";
+  }
+  return error instanceof Error ? error.message : fallback;
+}
+
+function renderCitedAnswer(
+  answer: string,
+  videoId: string,
+  citedTimes: string[],
+): ReactNode[] {
+  const citedSet = new Set(citedTimes);
+  return answer.split(/(\[\d+:\d{2}\])/g).map((part, index) => {
+    const timestamp = /^\[(\d+):([0-5]\d)\]$/.exec(part);
+    if (!timestamp) return <span key={index}>{part}</span>;
+    const seconds = Number(timestamp[1]) * 60 + Number(timestamp[2]);
+    if (!citedSet.has(`${timestamp[1]}:${timestamp[2]}`)) {
+      return <span key={index}>{part}</span>;
+    }
+    return (
+      <a
+        className="citation-link"
+        href={`https://www.youtube.com/watch?v=${encodeURIComponent(videoId)}&t=${seconds}s`}
+        key={index}
+        rel="noreferrer"
+        target="_blank"
+        title={`Open video at ${timestamp[1]}:${timestamp[2]}`}
+      >
+        {part}
+      </a>
+    );
+  });
+}
 
 export default function HomePage() {
   const [apiState, setApiState] = useState<ApiState>("checking");
+  const [videoUrl, setVideoUrl] = useState("");
+  const [loadedVideo, setLoadedVideo] = useState<LoadedVideo | null>(null);
+  const [question, setQuestion] = useState("");
+  const [turns, setTurns] = useState<ChatTurn[]>([]);
+  const [isLoadingVideo, setIsLoadingVideo] = useState(false);
+  const [isAsking, setIsAsking] = useState(false);
+  const [error, setError] = useState("");
 
   useEffect(() => {
+    if (!apiUrl) {
+      setApiState("unconfigured");
+      return;
+    }
     const controller = new AbortController();
 
     async function checkApi(): Promise<void> {
@@ -54,7 +189,87 @@ export default function HomePage() {
     checking: "Checking API",
     online: "API connected",
     offline: "API unavailable",
+    unconfigured: "Connect a backend",
   }[apiState];
+
+  async function handleLoadVideo(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!apiUrl) {
+      setError(
+        "The backend URL is not configured. Add NEXT_PUBLIC_API_URL in the Vercel project settings and redeploy.",
+      );
+      return;
+    }
+    setIsLoadingVideo(true);
+    setError("");
+    setLoadedVideo(null);
+    setTurns([]);
+    try {
+      const response = await fetch(`${apiUrl}/videos/index`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ url: videoUrl.trim() }),
+      });
+      if (!response.ok) throw new Error(await responseError(response));
+      const payload: unknown = await response.json();
+      if (!isIndexResponse(payload)) {
+        throw new Error("The backend returned an unexpected video response.");
+      }
+      setLoadedVideo({
+        videoId: payload.video_id,
+        url: videoUrl.trim(),
+        indexed: payload.indexed,
+      });
+      setVideoUrl(videoUrl.trim());
+    } catch (loadError: unknown) {
+      setError(friendlyRequestError(loadError, "We couldn't load this video. Please try again."));
+    } finally {
+      setIsLoadingVideo(false);
+    }
+  }
+
+  async function handleAsk(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!loadedVideo || !question.trim() || isAsking || !apiUrl) return;
+    const askedQuestion = question.trim();
+    const history: ChatMessage[] = turns.flatMap((turn) => [
+      { role: "user", content: turn.question },
+      { role: "assistant", content: turn.answer },
+    ]);
+    setIsAsking(true);
+    setError("");
+    try {
+      const response = await fetch(
+        `${apiUrl}/videos/${encodeURIComponent(loadedVideo.videoId)}/ask`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ question: askedQuestion, history }),
+        },
+      );
+      if (!response.ok) throw new Error(await responseError(response));
+      const payload: unknown = await response.json();
+      if (!isAskResponse(payload)) {
+        throw new Error("The backend returned an unexpected answer response.");
+      }
+      setTurns((previous) => [
+        ...previous,
+        {
+          question: askedQuestion,
+          answer: payload.answer,
+          citedTimes: payload.cited_times,
+          sources: payload.source_excerpts,
+        },
+      ]);
+      setQuestion("");
+    } catch (askError: unknown) {
+      setError(
+        friendlyRequestError(askError, "We couldn't answer this question. Please try again."),
+      );
+    } finally {
+      setIsAsking(false);
+    }
+  }
 
   return (
     <main className="site-shell">
@@ -68,7 +283,7 @@ export default function HomePage() {
           <span>chatmyvideo</span>
         </Link>
         <nav className="topbar-right" aria-label="Main navigation">
-          <a href="#how-it-works">How it works</a>
+          <a href="#chat">Ask about a video</a>
           <span className="api-status" data-state={apiState} role="status">
             <span className="status-dot" aria-hidden="true" />
             {statusLabel}
@@ -91,8 +306,8 @@ export default function HomePage() {
           take you straight to the moment that matters.
         </p>
         <div className="hero-actions">
-          <a className="primary-link" href="#how-it-works">
-            See how it works
+          <a className="primary-link" href="#chat">
+            Try it now
             <svg viewBox="0 0 20 20" fill="none" aria-hidden="true">
               <path
                 d="M4 10h12m-5-5 5 5-5 5"
@@ -103,7 +318,7 @@ export default function HomePage() {
               />
             </svg>
           </a>
-          <span className="quiet-link">Free to use · Built around the transcript</span>
+          <span className="quiet-link">Grounded answers · Clickable timestamps</span>
         </div>
 
         <aside className="preview" aria-label="Example video summary preview">
@@ -125,12 +340,140 @@ export default function HomePage() {
         </aside>
       </section>
 
+      <section className="chat-section" id="chat" aria-labelledby="chat-title">
+        <div className="chat-heading">
+          <span className="feature-number">Your video, your questions</span>
+          <h2 id="chat-title">Start with a link.</h2>
+          <p>We’ll find the captions, then answer from the video with moments you can verify.</p>
+        </div>
+
+        <div className="video-workspace">
+          <div className="workspace-main">
+            <form className="video-form" onSubmit={handleLoadVideo}>
+              <label htmlFor="video-url">YouTube video link</label>
+              <div className="form-row">
+                <input
+                  autoComplete="url"
+                  id="video-url"
+                  inputMode="url"
+                  onChange={(event) => setVideoUrl(event.target.value)}
+                  placeholder="https://www.youtube.com/watch?v=..."
+                  required
+                  type="text"
+                  value={videoUrl}
+                />
+                <button className="primary-button" disabled={isLoadingVideo} type="submit">
+                  {isLoadingVideo ? "Loading captions…" : "Load video"}
+                </button>
+              </div>
+              <p className="form-hint">Only existing captions are used. No AI transcription.</p>
+            </form>
+
+            {error && (
+              <div className="error-message" role="alert">
+                {error}
+              </div>
+            )}
+
+            {loadedVideo && (
+              <section className="loaded-video" aria-label="Loaded video chat">
+                <div className="loaded-video-header">
+                  <div>
+                    <span className="feature-number">
+                      {loadedVideo.indexed ? "Video ready" : "Video ready · already indexed"}
+                    </span>
+                    <h3>Ask anything about this video.</h3>
+                  </div>
+                  <a
+                    className="video-open-link"
+                    href={`https://www.youtube.com/watch?v=${encodeURIComponent(loadedVideo.videoId)}`}
+                    rel="noreferrer"
+                    target="_blank"
+                  >
+                    Open on YouTube ↗
+                  </a>
+                </div>
+                <div className="video-player">
+                  <iframe
+                    allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
+                    allowFullScreen
+                    loading="lazy"
+                    referrerPolicy="strict-origin-when-cross-origin"
+                    src={`https://www.youtube-nocookie.com/embed/${encodeURIComponent(loadedVideo.videoId)}`}
+                    title="YouTube video player"
+                  />
+                </div>
+
+                {turns.length > 0 && (
+                  <div className="conversation" aria-live="polite">
+                    {turns.map((turn, index) => (
+                      <article className="chat-turn" key={`${index}-${turn.question}`}>
+                        <p className="question-bubble">{turn.question}</p>
+                        <div className="answer-block">
+                          <p>{renderCitedAnswer(turn.answer, loadedVideo.videoId, turn.citedTimes)}</p>
+                          {turn.sources.length > 0 && (
+                            <details className="source-list">
+                              <summary>Sources ({turn.sources.length})</summary>
+                              <ul>
+                                {turn.sources.map((source) => (
+                                  <li key={`${source.position}-${source.start}`}>
+                                    <a
+                                      href={`https://www.youtube.com/watch?v=${encodeURIComponent(loadedVideo.videoId)}&t=${Math.floor(source.start)}s`}
+                                      rel="noreferrer"
+                                      target="_blank"
+                                    >
+                                      <span className="source-time">
+                                        {formatTime(source.start)}–{formatTime(source.end)}
+                                      </span>
+                                    </a>
+                                    <span>{source.text}</span>
+                                  </li>
+                                ))}
+                              </ul>
+                            </details>
+                          )}
+                        </div>
+                      </article>
+                    ))}
+                    <div aria-live="polite" className="chat-bottom" />
+                  </div>
+                )}
+
+                <form className="question-form" onSubmit={handleAsk}>
+                  <label htmlFor="video-question">Ask a question</label>
+                  <div className="form-row">
+                    <input
+                      id="video-question"
+                      maxLength={2000}
+                      onChange={(event) => setQuestion(event.target.value)}
+                      placeholder="What are the main points?"
+                      required
+                      value={question}
+                    />
+                    <button
+                      className="primary-button"
+                      disabled={isAsking || !question.trim()}
+                      type="submit"
+                    >
+                      {isAsking ? "Thinking…" : "Ask"}
+                    </button>
+                  </div>
+                  {turns.length > 0 && (
+                    <p className="form-hint">Recent conversation is included for follow-ups.</p>
+                  )}
+                </form>
+              </section>
+            )}
+          </div>
+        </div>
+      </section>
+
       <section className="features" id="how-it-works" aria-label="How it works">
         <div className="feature-grid">
           <article className="feature">
             <span className="feature-number">01 — Make it clear</span>
             <h2>Get the whole picture.</h2>
-            <p>Turn a long video into a concise summary and notes you can revisit.</p>
+            <p>Ask broad questions to get a concise, timestamped overview of the video.</p>
           </article>
           <article className="feature">
             <span className="feature-number">02 — Find the moment</span>

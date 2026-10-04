@@ -1,0 +1,169 @@
+{
+  "schema_version": 1,
+  "videos": [
+    {
+      "id": "tutorial-en",
+      "title": "Short English tutorial",
+      "video_type": "short_tutorial",
+      "caption_type": "manual_or_creator_captions",
+      "url": "",
+      "questions": [
+        {
+          "id": "tutorial-steps",
+          "question": "What are the main steps shown to complete the task?",
+          "off_topic": false,
+          "expected_time_seconds": null,
+          "expected_points": [],
+          "expected_answer": ""
+        },
+        {
+          "id": "tutorial-tools",
+          "question": "What tools or settings does the instructor use, and why?",
+          "off_topic": false,
+          "expected_time_seconds": null,
+          "expected_points": [],
+          "expected_answer": ""
+        },
+        {
+          "id": "tutorial-troubleshooting",
+          "question": "What common mistake or troubleshooting advice is mentioned?",
+          "off_topic": false,
+          "expected_time_seconds": null,
+          "expected_points": [],
+          "expected_answer": ""
+        },
+        {
+          "id": "tutorial-off-topic",
+          "question": "What is the capital of Japan?",
+          "off_topic": true,
+          "expected_time_seconds": null,
+          "expected_points": [],
+          "expected_answer": "The answer should clearly say the video does not cover this."
+        }
+      ]
+    },
+    {
+      "id": "talk-en",
+      "title": "Long English talk",
+      "video_type": "long_talk",
+      "caption_type": "manual_or_creator_captions",
+      "url": "",
+      "questions": [
+        {
+          "id": "talk-argument",
+          "question": "What is the speaker's central argument?",
+          "off_topic": false,
+          "expected_time_seconds": null,
+          "expected_points": [],
+          "expected_answer": ""
+        },
+        {
+          "id": "talk-evidence",
+          "question": "What evidence or examples support the argument?",
+          "off_topic": false,
+          "expected_time_seconds": null,
+          "expected_points": [],
+          "expected_answer": ""
+        },
+        {
+          "id": "talk-conclusion",
+          "question": "What conclusion or recommendation does the speaker give?",
+          "off_topic": false,
+          "expected_time_seconds": null,
+          "expected_points": [],
+          "expected_answer": ""
+        },
+        {
+          "id": "talk-off-topic",
+          "question": "How do I bake a chocolate cake?",
+          "off_topic": true,
+          "expected_time_seconds": null,
+          "expected_points": [],
+          "expected_answer": "The answer should clearly say the video does not cover this."
+        }
+      ]
+    },
+    {
+      "id": "hindi-video",
+      "title": "Hindi video",
+      "video_type": "hindi",
+      "caption_type": "manual_or_creator_captions",
+      "url": "",
+      "questions": [
+        {
+          "id": "hindi-message",
+          "question": "वक्ता का मुख्य संदेश क्या है?",
+          "off_topic": false,
+          "expected_time_seconds": null,
+          "expected_points": [],
+          "expected_answer": ""
+        },
+        {
+          "id": "hindi-evidence",
+          "question": "वीडियो में कौन-से उदाहरण या कारण इस संदेश का समर्थन करते हैं?",
+          "off_topic": false,
+          "expected_time_seconds": null,
+          "expected_points": [],
+          "expected_answer": ""
+        },
+        {
+          "id": "hindi-conclusion",
+          "question": "वक्ता अंत में क्या निष्कर्ष या सलाह देते हैं?",
+          "off_topic": false,
+          "expected_time_seconds": null,
+          "expected_points": [],
+          "expected_answer": ""
+        },
+        {
+          "id": "hindi-off-topic",
+          "question": "What is the boiling point of water?",
+          "off_topic": true,
+          "expected_time_seconds": null,
+          "expected_points": [],
+          "expected_answer": "The answer should clearly say the video does not cover this."
+        }
+      ]
+    },
+    {
+      "id": "auto-captions",
+      "title": "Video with auto-generated captions",
+      "video_type": "auto_captions",
+      "caption_type": "auto_generated",
+      "url": "",
+      "questions": [
+        {
+          "id": "auto-main-idea",
+          "question": "What is the main process or idea described?",
+          "off_topic": false,
+          "expected_time_seconds": null,
+          "expected_points": [],
+          "expected_answer": ""
+        },
+        {
+          "id": "auto-details",
+          "question": "What key details, examples, or numbers are mentioned?",
+          "off_topic": false,
+          "expected_time_seconds": null,
+          "expected_points": [],
+          "expected_answer": ""
+        },
+        {
+          "id": "auto-takeaway",
+          "question": "What practical takeaway does the speaker provide?",
+          "off_topic": false,
+          "expected_time_seconds": null,
+          "expected_points": [],
+          "expected_answer": ""
+        },
+        {
+          "id": "auto-off-topic",
+          "question": "Who won the 2018 FIFA World Cup?",
+          "off_topic": true,
+          "expected_time_seconds": null,
+          "expected_points": [],
+          "expected_answer": "The answer should clearly say the video does not cover this."
+        }
+      ]
+    }
+  ]
+}
