@@ -38,7 +38,7 @@ I'm an intermediate developer: I can read and tweak code and debug simple issues
 | Backend / agent | Python 3.12, FastAPI, Pydantic v2 |
 | LLM access | Groq (free tier) via `backend/app/llm/groq_provider.py`; default model `openai/gpt-oss-120b`. Stay on Groq; do not switch to paid providers. |
 | Transcripts | Supadata API (existing captions only, `mode=native`), behind a `TranscriptProvider` interface |
-| Embeddings | Local `sentence-transformers` model `intfloat/multilingual-e5-small` (default; `-large` needs ~3 GB RAM and crashes small Railway instances), downloaded from Hugging Face |
+| Embeddings | `intfloat/multilingual-e5-small` via the Hugging Face Inference API (`EMBED_PROVIDER=huggingface`, default). `EMBED_PROVIDER=local` runs it with `sentence-transformers` instead, which needs ~1.1 GB RAM and crashes the ~1 GB Railway instance. |
 | Search | In-memory FAISS index per video (cleared on backend restart) |
 | Video metadata | *Planned:* YouTube Data API v3 (title, channel, duration, thumbnail) |
 | Database | *Planned:* Supabase Postgres with `pgvector` |
@@ -178,10 +178,11 @@ pnpm lint && pnpm build
 Backend (`backend/.env`, mirrored in Railway). These are the variables the code reads today (`backend/app/config.py`):
 ```
 GROQ_API_KEY=                    # required
-HF_TOKEN=                        # required (Hugging Face model download)
+HF_TOKEN=                        # required; needs the "Make calls to Inference Providers" permission
 SUPADATA_API_KEY=                # required (transcripts)
 LLM_MODEL=openai/gpt-oss-120b
-EMBED_MODEL=intfloat/multilingual-e5-small   # -large is better but needs ~3 GB RAM
+EMBED_PROVIDER=huggingface       # or local (needs ~1.1 GB RAM)
+EMBED_MODEL=intfloat/multilingual-e5-small
 RETRIEVER_K=4                    # excerpts retrieved per question on long videos
 FULL_CONTEXT_CHAR_LIMIT=24000    # videos <=10 min and under this many transcript characters use the full transcript
 FRONTEND_ORIGIN=http://localhost:3000        # set to the Vercel URL in Railway (CORS)

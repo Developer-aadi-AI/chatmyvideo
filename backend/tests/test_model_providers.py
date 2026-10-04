@@ -1,5 +1,8 @@
+import json
 import sys
 from types import SimpleNamespace
+from typing import Self
+from urllib.error import HTTPError
 
 import pytest
 
@@ -10,7 +13,8 @@ from app.llm.groq_provider import ChatMessage
 
 
 @pytest.fixture(autouse=True)
-def reset_model_singletons() -> None:
+def reset_model_singletons(monkeypatch) -> None:
+    monkeypatch.setattr(config, "EMBED_PROVIDER", "local")
     groq_provider._provider = None
     embeddings._model = None
     embeddings._model_name = None
@@ -164,3 +168,80 @@ def test_groq_api_failure_becomes_friendly_runtime_error() -> None:
             [ChatMessage(role="user", content="Question")],
             transcript_language="en",
         )
+
+
+class _FakeHFResponse:
+    def __init__(self, payload: object) -> None:
+        self._body = json.dumps(payload).encode("utf-8")
+
+    def __enter__(self) -> Self:
+        return self
+
+    def __exit__(self, *args: object) -> None:
+        return None
+
+    def read(self) -> bytes:
+        return self._body
+
+
+def _use_hf_api(monkeypatch) -> None:
+    monkeypatch.setattr(config, "EMBED_PROVIDER", "huggingface")
+    monkeypatch.setattr(config, "HF_TOKEN", "test-token")
+    monkeypatch.setattr(config, "EMBED_MODEL", "intfloat/multilingual-e5-small")
+    monkeypatch.setattr(embeddings.time, "sleep", lambda seconds: None)
+
+
+def test_hf_api_embeds_in_batches_with_prefixes_and_normalizes(monkeypatch) -> None:
+    _use_hf_api(monkeypatch)
+    monkeypatch.setattr(embeddings, "_HF_BATCH_SIZE", 2)
+    sent: list[dict[str, object]] = []
+
+    def fake_urlopen(request, timeout):
+        assert request.get_header("Authorization") == "Bearer test-token"
+        assert "intfloat/multilingual-e5-small" in request.full_url
+        body = json.loads(request.data)
+        sent.append(body)
+        return _FakeHFResponse([[3.0, 4.0] for _ in body["inputs"]])
+
+    monkeypatch.setattr(embeddings, "urlopen", fake_urlopen)
+
+    vectors = embeddings.embed_documents(["a", "b", "c"])
+    query = embeddings.embed_query("question")
+
+    assert [body["inputs"] for body in sent] == [
+        ["passage: a", "passage: b"],
+        ["passage: c"],
+        ["query: question"],
+    ]
+    assert vectors == [[0.6, 0.8]] * 3
+    assert query == [0.6, 0.8]
+    assert embeddings._model is None
+
+
+def test_hf_api_retries_while_model_warms_up(monkeypatch) -> None:
+    _use_hf_api(monkeypatch)
+    attempts = 0
+
+    def fake_urlopen(request, timeout):
+        nonlocal attempts
+        attempts += 1
+        if attempts == 1:
+            raise HTTPError(request.full_url, 503, "Loading", {}, None)
+        return _FakeHFResponse([[1.0, 0.0]])
+
+    monkeypatch.setattr(embeddings, "urlopen", fake_urlopen)
+
+    assert embeddings.embed_query("question") == [1.0, 0.0]
+    assert attempts == 2
+
+
+def test_hf_api_rejected_token_is_a_friendly_runtime_error(monkeypatch) -> None:
+    _use_hf_api(monkeypatch)
+
+    def fake_urlopen(request, timeout):
+        raise HTTPError(request.full_url, 403, "Forbidden", {}, None)
+
+    monkeypatch.setattr(embeddings, "urlopen", fake_urlopen)
+
+    with pytest.raises(RuntimeError, match="temporarily unavailable"):
+        embeddings.embed_documents(["text"])
