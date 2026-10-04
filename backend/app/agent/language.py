@@ -222,8 +222,29 @@ def detect_question_language(question: str, transcript_language: str) -> str:
     return normalize_language(transcript_language)
 
 
+# Codes the frontend may send to choose the answer language; "video" means the
+# transcript's own language. Anything else is rejected, so no free text reaches prompts.
+ANSWER_LANGUAGE_CODES = frozenset(_LANGUAGE_NAMES) | {"video"}
+
+
+def resolve_answer_language(
+    question: str,
+    transcript_language: str,
+    requested: str | None = None,
+) -> str:
+    """Return the answer language: the user's choice, or one detected from the question."""
+    if requested == "video":
+        return normalize_language(transcript_language)
+    if requested in _LANGUAGE_NAMES:
+        return _LANGUAGE_NAMES[requested]
+    return detect_question_language(question, transcript_language)
+
+
 def answer_language_instruction(question: str, transcript_language: str) -> str:
-    language = detect_question_language(question, transcript_language)
+    return language_instruction(detect_question_language(question, transcript_language))
+
+
+def language_instruction(language: str) -> str:
     return (
         f"Answer in {language}. Keep the response natural and fluent in that language. "
         "Do not change languages unless the user asks you to."

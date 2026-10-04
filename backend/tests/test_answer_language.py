@@ -73,3 +73,14 @@ def test_instruction_explicitly_selects_question_language() -> None:
 
 def test_iso_code_fallback_is_normalized() -> None:
     assert detect_question_language("Can you explain?", "pt-BR") == "Portuguese"
+
+
+def test_chosen_answer_language_overrides_detection() -> None:
+    from app.agent.language import resolve_answer_language
+
+    assert resolve_answer_language("Summarize this video", "ur", "en") == "English"
+    assert resolve_answer_language("Summarize this video", "ur", "video") == "Urdu"
+    assert resolve_answer_language("Summarize this video", "ur", "hinglish") == (
+        "Hinglish (Hindi written in Latin script)"
+    )
+    assert resolve_answer_language("Summarize this video", "ur", None) == "Urdu"

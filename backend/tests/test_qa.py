@@ -531,3 +531,26 @@ def test_whole_video_requests_use_the_overview_path() -> None:
         "What is this video about?",
     ):
         assert _is_overview_question(question), question
+
+
+def test_chosen_language_is_used_for_whole_video_answers() -> None:
+    sent: list[dict] = []
+
+    class SearchService:
+        def get_transcript(self, video_id: str) -> Transcript:
+            return make_long_transcript(language="ur")
+
+    class LLMProvider:
+        def complete(self, messages, *, include_language_instruction: bool = True, **kwargs):
+            if not include_language_instruction:
+                return "- The video opens [00:00]."
+            sent.append({"messages": messages, **kwargs})
+            return "It opens with the main idea [00:00]."
+
+    QuestionAnswerService(
+        search_service=SearchService(),
+        llm_provider=LLMProvider(),
+    ).answer("dQw4w9WgXcQ", "Summarize this video", answer_language="en")
+
+    assert sent[0]["answer_language"] == "English"
+    assert "Answer in English." in sent[0]["messages"][-1]["content"]

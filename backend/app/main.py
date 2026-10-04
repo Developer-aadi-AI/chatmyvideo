@@ -4,6 +4,7 @@ from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field, field_validator
 
+from app.agent.language import ANSWER_LANGUAGE_CODES
 from app.agent.qa import get_question_answer_service
 from app.config import FRONTEND_ORIGIN, RETRIEVER_K
 from app.ingest.search import get_video_search_service
@@ -26,6 +27,18 @@ class AskVideoRequest(BaseModel):
     question: str = Field(min_length=1, max_length=2000)
     limit: int = Field(default=RETRIEVER_K, ge=1, le=20)
     history: list[ChatHistoryMessage] = Field(default_factory=list, max_length=20)
+    # Optional language code chosen in the UI ("en", "hi", "hinglish", "video", ...).
+    answer_language: str | None = Field(default=None, max_length=20)
+
+    @field_validator("answer_language")
+    @classmethod
+    def answer_language_must_be_supported(cls, value: str | None) -> str | None:
+        if value is None or not value.strip():
+            return None
+        code = value.strip().lower()
+        if code not in ANSWER_LANGUAGE_CODES:
+            raise ValueError("Please choose a supported answer language.")
+        return code
 
     @field_validator("question")
     @classmethod
@@ -123,6 +136,8 @@ def ask_video(video_id: str, request: AskVideoRequest) -> dict:
             request.question,
             limit=request.limit,
             history=[message.model_dump() for message in request.history],
+            # Only pass the language when the user chose one; otherwise it is detected.
+            **({"answer_language": request.answer_language} if request.answer_language else {}),
         )
     except LookupError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc

@@ -6,7 +6,12 @@ import threading
 from collections.abc import Sequence
 from dataclasses import dataclass
 
-from app.agent.language import answer_language_instruction, detect_question_language
+from app.agent.language import (
+    answer_language_instruction,
+    detect_question_language,
+    language_instruction,
+    resolve_answer_language,
+)
 from app.config import FULL_CONTEXT_CHAR_LIMIT, RETRIEVER_K
 from app.ingest.search import SearchResult, VideoSearchService, get_video_search_service
 from app.llm.groq_provider import (
@@ -172,6 +177,7 @@ def _build_overview_messages(
     summaries: Sequence[_SectionSummary],
     history: Sequence[ChatMessage],
     transcript_language: str,
+    answer_language: str | None = None,
 ) -> list[ChatMessage]:
     summaries_text = "\n\n".join(summary.text for summary in summaries)
     history_text = "\n".join(f"{message['role']}: {message['content']}" for message in history)
@@ -197,7 +203,7 @@ def _build_overview_messages(
                 f"Recent conversation for context (not evidence):\n"
                 f"{history_text or '[No prior conversation.]'}\n\n"
                 f"Timestamped section summaries:\n{summaries_text}\n\n"
-                f"{answer_language_instruction(question, transcript_language)}\n\n"
+                f"{_instruction(question, transcript_language, answer_language)}\n\n"
                 # The request goes last so a long history cannot bury it.
                 f"The user's request (answer this now):\n{question}"
             ),
@@ -302,11 +308,18 @@ class QuestionAnswerService:
         *,
         limit: int = RETRIEVER_K,
         history: Sequence[ChatMessage] = (),
+        answer_language: str | None = None,
     ) -> QuestionAnswer:
+        """Answer a question; `answer_language` is an optional code from ANSWER_LANGUAGE_CODES."""
         recent_history = _recent_history(history)
         llm_provider = self._llm_provider
 
         transcript = self._search_service.get_transcript(video_id)
+        chosen_language = (
+            resolve_answer_language(question, transcript.language, answer_language)
+            if answer_language
+            else None
+        )
         # Short videos answer from the whole transcript, unless the captions are so dense
         # that they would exceed FULL_CONTEXT_CHAR_LIMIT; those fall back to search.
         transcript_chars = sum(len(segment.text) for segment in transcript.segments)
@@ -321,6 +334,7 @@ class QuestionAnswerService:
                 recent_history,
                 llm_provider=llm_provider,
                 transcript_language=transcript.language,
+                answer_language=chosen_language,
             )
 
         if _is_overview_question(question):
@@ -331,6 +345,7 @@ class QuestionAnswerService:
                 transcript,
                 recent_history,
                 llm_provider,
+                answer_language=chosen_language,
             )
 
         # Only the search path needs a standalone question; short videos and overviews
@@ -352,6 +367,7 @@ class QuestionAnswerService:
             recent_history,
             llm_provider=llm_provider,
             transcript_language=transcript_language,
+            answer_language=chosen_language,
         )
 
     def _answer_with_excerpts(
@@ -362,8 +378,9 @@ class QuestionAnswerService:
         *,
         llm_provider: GroqProvider | None,
         transcript_language: str,
+        answer_language: str | None = None,
     ) -> QuestionAnswer:
-        language = detect_question_language(question, transcript_language)
+        language = answer_language or detect_question_language(question, transcript_language)
         if not excerpts:
             return QuestionAnswer(
                 answer=_not_covered_answer(language),
@@ -373,9 +390,10 @@ class QuestionAnswerService:
 
         provider = llm_provider or get_llm_provider()
         completion = provider.complete(
-            _build_messages(question, excerpts, history=history),
+            _build_messages(question, excerpts, history=history, answer_language=answer_language),
             transcript_language=transcript_language,
             answer_language_question=question,
+            **_language_kwargs(answer_language),
         )
         answer, cited_times = validate_citations(completion, excerpts)
         return QuestionAnswer(
@@ -399,6 +417,8 @@ class QuestionAnswerService:
         transcript: Transcript,
         history: Sequence[ChatMessage],
         llm_provider: GroqProvider,
+        *,
+        answer_language: str | None = None,
     ) -> QuestionAnswer:
         sections = _transcript_sections(transcript)
         summaries: list[_SectionSummary] = []
@@ -410,7 +430,7 @@ class QuestionAnswerService:
             if summary is not None:
                 summaries.append(summary)
                 summarized_spans.append(_section_span(section))
-        language = detect_question_language(question, transcript.language)
+        language = answer_language or detect_question_language(question, transcript.language)
         if not summaries:
             return QuestionAnswer(
                 answer=_not_covered_answer(language),
@@ -419,9 +439,12 @@ class QuestionAnswerService:
             )
 
         completion = llm_provider.complete(
-            _build_overview_messages(question, summaries, history, transcript.language),
+            _build_overview_messages(
+                question, summaries, history, transcript.language, answer_language
+            ),
             transcript_language=transcript.language,
             answer_language_question=question,
+            **_language_kwargs(answer_language),
         )
         answer, cited_times = _validate_citations(completion, summarized_spans)
         source_segments = _segments_for_timestamps(transcript, cited_times)
@@ -503,6 +526,18 @@ def _section_span(section: Sequence[TranscriptSegment]) -> tuple[float, float]:
     return _span(section[0].start, max(segment.end for segment in section))
 
 
+def _instruction(question: str, transcript_language: str, answer_language: str | None) -> str:
+    if answer_language:
+        return language_instruction(answer_language)
+    return answer_language_instruction(question, transcript_language)
+
+
+def _language_kwargs(answer_language: str | None) -> dict[str, str]:
+    # Only pass the override when the user chose a language, so providers without the
+    # parameter (and existing callers) keep detecting it from the question.
+    return {"answer_language": answer_language} if answer_language else {}
+
+
 def _recent_history(history: Sequence[ChatMessage]) -> list[ChatMessage]:
     return [
         ChatMessage(
@@ -556,6 +591,7 @@ def _build_messages(
     excerpts: list[SearchResult],
     *,
     history: Sequence[ChatMessage] = (),
+    answer_language: str | None = None,
 ) -> list[ChatMessage]:
     excerpt_text = "\n\n".join(
         f"[{format_timestamp(excerpt.start)}] {excerpt.text}" for excerpt in excerpts
@@ -573,7 +609,7 @@ def _build_messages(
         "not guess. " + _ANSWER_LENGTH_RULES
     )
     user_content = (
-        f"{answer_language_instruction(question, excerpts[0].language)}\n\n"
+        f"{_instruction(question, excerpts[0].language, answer_language)}\n\n"
         f"Recent conversation for context (not evidence):\n"
         f"{history_text or '[No prior conversation.]'}\n\n"
         f"Question:\n{question}\n\n"

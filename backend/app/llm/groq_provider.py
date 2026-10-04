@@ -6,7 +6,7 @@ from collections.abc import Sequence
 from typing import Any, Protocol, TypedDict
 
 from app import config
-from app.agent.language import answer_language_instruction
+from app.agent.language import answer_language_instruction, language_instruction
 
 logger = logging.getLogger(__name__)
 _LLM_TIMEOUT_SECONDS = 30.0
@@ -63,11 +63,16 @@ class GroqProvider:
         *,
         transcript_language: str,
         answer_language_question: str | None = None,
+        answer_language: str | None = None,
         include_language_instruction: bool = True,
     ) -> str:
         """Generate one chat completion using conservative, retryable defaults."""
         completion_messages = list(messages)
-        if include_language_instruction:
+        if include_language_instruction and answer_language:
+            completion_messages.append(
+                ChatMessage(role="system", content=language_instruction(answer_language))
+            )
+        elif include_language_instruction:
             language_question = answer_language_question or next(
                 (message["content"] for message in reversed(messages) if message["role"] == "user"),
                 "",

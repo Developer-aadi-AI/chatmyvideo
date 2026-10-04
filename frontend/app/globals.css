@@ -561,6 +561,34 @@ h1 em {
   color: #fff;
 }
 
+.question-form .language-picker {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 0 0 auto;
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.language-picker select {
+  min-height: 36px;
+  padding: 0 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fff;
+  color: var(--ink);
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+@media (max-width: 560px) {
+  .question-form .language-picker {
+    margin-left: 0;
+  }
+}
+
 .quick-action:disabled {
   cursor: wait;
   opacity: 0.55;

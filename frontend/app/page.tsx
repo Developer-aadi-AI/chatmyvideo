@@ -40,6 +40,34 @@ const QUICK_ACTIONS = [
   { label: "Summary", question: "Summarize this video" },
   { label: "Flashcards", question: "Create flashcards for this video" },
 ] as const;
+// Codes must match ANSWER_LANGUAGE_CODES in backend/app/agent/language.py.
+const ANSWER_LANGUAGES = [
+  { code: "en", label: "English" },
+  { code: "hi", label: "Hindi" },
+  { code: "hinglish", label: "Hinglish" },
+  { code: "ur", label: "Urdu" },
+  { code: "bn", label: "Bengali" },
+  { code: "mr", label: "Marathi" },
+  { code: "gu", label: "Gujarati" },
+  { code: "pa", label: "Punjabi" },
+  { code: "ta", label: "Tamil" },
+  { code: "te", label: "Telugu" },
+  { code: "kn", label: "Kannada" },
+  { code: "ml", label: "Malayalam" },
+  { code: "es", label: "Spanish" },
+  { code: "fr", label: "French" },
+  { code: "de", label: "German" },
+  { code: "pt", label: "Portuguese" },
+  { code: "ar", label: "Arabic" },
+  { code: "ru", label: "Russian" },
+  { code: "zh", label: "Chinese" },
+  { code: "ja", label: "Japanese" },
+  { code: "ko", label: "Korean" },
+  { code: "video", label: "Video's language" },
+  { code: "auto", label: "Auto (match my question)" },
+] as const;
+const DEFAULT_ANSWER_LANGUAGE = "en";
+const ANSWER_LANGUAGE_STORAGE_KEY = "chatmyvideo.answerLanguage";
 const MAX_HISTORY_CHARS = 4000;
 
 const configuredApiUrl = process.env.NEXT_PUBLIC_API_URL?.trim();
@@ -160,6 +188,28 @@ export default function HomePage() {
   const [isAsking, setIsAsking] = useState(false);
   const [error, setError] = useState("");
   const playerRef = useRef<HTMLIFrameElement>(null);
+  const [answerLanguage, setAnswerLanguage] = useState<string>(DEFAULT_ANSWER_LANGUAGE);
+
+  // Restore the viewer's last language choice (a per-browser convenience only).
+  useEffect(() => {
+    try {
+      const saved = window.localStorage.getItem(ANSWER_LANGUAGE_STORAGE_KEY);
+      if (saved && ANSWER_LANGUAGES.some((language) => language.code === saved)) {
+        setAnswerLanguage(saved);
+      }
+    } catch {
+      // Storage can be unavailable (private mode); the default language still works.
+    }
+  }, []);
+
+  function chooseAnswerLanguage(code: string): void {
+    setAnswerLanguage(code);
+    try {
+      window.localStorage.setItem(ANSWER_LANGUAGE_STORAGE_KEY, code);
+    } catch {
+      // Ignore storage failures; the choice still applies for this visit.
+    }
+  }
 
   // Seek the embedded player through the YouTube IFrame postMessage API (enabled by
   // `enablejsapi=1` in the embed URL), so no extra script or dependency is needed.
@@ -282,7 +332,12 @@ export default function HomePage() {
         {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ question: askedQuestion, history }),
+          body: JSON.stringify({
+            question: askedQuestion,
+            history,
+            // "auto" lets the backend detect the language from the question.
+            ...(answerLanguage === "auto" ? {} : { answer_language: answerLanguage }),
+          }),
         },
       );
       if (!response.ok) throw new Error(await responseError(response));
@@ -498,6 +553,20 @@ export default function HomePage() {
                         {action.label}
                       </button>
                     ))}
+                    <label className="language-picker">
+                      <span>Answer in</span>
+                      <select
+                        disabled={isAsking}
+                        onChange={(event) => chooseAnswerLanguage(event.target.value)}
+                        value={answerLanguage}
+                      >
+                        {ANSWER_LANGUAGES.map((language) => (
+                          <option key={language.code} value={language.code}>
+                            {language.label}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
                   </div>
                   <label htmlFor="video-question">Ask a question</label>
                   <div className="form-row">
