@@ -43,7 +43,7 @@ HF_TOKEN: str = _backend_setting("HF_TOKEN")
 SUPADATA_API_KEY: str = _supadata_api_key_setting()
 
 LLM_MODEL: str = _backend_setting("LLM_MODEL", "openai/gpt-oss-120b")
-EMBED_MODEL: str = _backend_setting("EMBED_MODEL", "intfloat/multilingual-e5-large")
+EMBED_MODEL: str = _backend_setting("EMBED_MODEL", "intfloat/multilingual-e5-small")
 RETRIEVER_K: int = _integer_setting("RETRIEVER_K", 4)
 FULL_CONTEXT_CHAR_LIMIT: int = _integer_setting("FULL_CONTEXT_CHAR_LIMIT", 24000)
 

@@ -29,9 +29,9 @@ Groq chat completions use a process-wide client with a 30-second timeout, two
 retries, and temperature `0.2`. The configured `EMBED_MODEL` is loaded once per
 process and shared by document and query embedding helpers. E5 helpers apply
 `passage: ` and `query: ` prefixes automatically and return normalized vectors.
-The default model is `intfloat/multilingual-e5-large`; set
-`EMBED_MODEL=intfloat/multilingual-e5-small` before starting the backend to
-reduce memory use. Restart the backend after changing the model setting.
+The default model is `intfloat/multilingual-e5-small`, which fits in about
+0.5 GB of RAM; set `EMBED_MODEL=intfloat/multilingual-e5-large` for better
+search quality only on machines with 3+ GB of memory. Restart the backend after changing the model setting.
 
 Groq completions require the video's transcript language and automatically add
 an answer-language instruction based on the latest user question. Stable
