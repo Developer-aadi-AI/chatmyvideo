@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import type { FormEvent, ReactNode } from "react";
 import Link from "next/link";
 
+import Markdown from "@/components/Markdown";
 import TimestampLink from "@/components/TimestampLink";
 
 type ApiState = "checking" | "online" | "offline" | "unconfigured";
@@ -444,7 +445,10 @@ export default function HomePage() {
                       <article className="chat-turn" key={`${index}-${turn.question}`}>
                         <p className="question-bubble">{turn.question}</p>
                         <div className="answer-block">
-                          <p>{renderCitedAnswer(turn.answer, turn.citedTimes, seekTo)}</p>
+                          <Markdown
+                            renderText={(text) => renderCitedAnswer(text, turn.citedTimes, seekTo)}
+                            text={turn.answer}
+                          />
                           {turn.sources.length > 0 && (
                             <details className="source-list">
                               <summary>Sources ({turn.sources.length})</summary>

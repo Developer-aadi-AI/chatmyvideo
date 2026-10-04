@@ -511,3 +511,23 @@ def test_validation_normalizes_full_width_bracket_citations() -> None:
 
     assert answer == "They have very long trunks[03:12]."
     assert cited_times == ["03:12"]
+
+
+def test_validation_accepts_ranges_and_times_inside_a_supplied_excerpt() -> None:
+    answer, cited_times = validate_citations(
+        "A range [03:12‑03:20]. Inside [03:20]. Hours form [0:03:15]. Outside [03:30].",
+        [make_result(start=192, end=205)],
+    )
+
+    assert answer == "A range [03:12]. Inside [03:20]. Hours form [03:15]. Outside."
+    assert cited_times == ["03:12", "03:20", "03:15"]
+
+
+def test_whole_video_requests_use_the_overview_path() -> None:
+    for question in (
+        "can you create some flashcards",
+        "what are the topics covered in this video",
+        "make a quiz",
+        "What is this video about?",
+    ):
+        assert _is_overview_question(question), question
