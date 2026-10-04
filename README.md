@@ -42,7 +42,7 @@ corepack pnpm build
 
 Push this project to a GitHub repository, then create two services connected to that repository:
 
-1. **Railway backend:** set the service root directory to `backend`. Use `uv run uvicorn app.main:app --host 0.0.0.0 --port $PORT` as the start command. Set `FRONTEND_ORIGIN` to the deployed Vercel origin (for example, `https://your-app.vercel.app`).
+1. **Railway backend:** set the service root directory to `backend`, the build command to `pip install "fastapi[standard]>=0.115,<1"`, and the start command to `python -m uvicorn app.main:app --host 0.0.0.0 --port $PORT`. Set `FRONTEND_ORIGIN` to the deployed Vercel origin (for example, `https://your-app.vercel.app`) and set the service's `PORT` variable to match the target port configured for its Railway domain.
 2. **Vercel frontend:** set the project root directory to `frontend`. Set `NEXT_PUBLIC_API_URL` to the Railway public URL, without a trailing slash, and deploy. Redeploy the frontend after changing this variable.
 
 Once both services are deployed, open the Vercel URL and confirm the API status indicator reports that the backend is online. The frontend checks `GET /health`; it does not yet ingest videos.
