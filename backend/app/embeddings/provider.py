@@ -5,7 +5,7 @@ import logging
 import math
 import threading
 import time
-from collections.abc import Sequence
+from collections.abc import Iterable, Sequence
 from typing import Protocol
 from urllib.error import HTTPError, URLError
 from urllib.parse import quote
@@ -23,17 +23,17 @@ _HF_MAX_ATTEMPTS = 3
 _EMBEDDING_UNAVAILABLE = (
     "Video indexing is temporarily unavailable. Please try again in a few minutes."
 )
+# The int8-quantized ONNX export in the model's own Hugging Face repo. It peaks around
+# 550 MB of RAM (the full-precision file needs ~1.3 GB), and its vectors match the
+# original model with ~0.99 cosine similarity. It also runs on CPUs without AVX-512.
+_LOCAL_ONNX_FILE = "onnx/model_qint8_avx512_vnni.onnx"
+_LOCAL_EMBEDDING_DIM = 384
+# Small batches keep peak memory low; larger ones barely speed things up on a CPU.
+_LOCAL_BATCH_SIZE = 4
 
 
 class _Encoder(Protocol):
-    def encode(
-        self,
-        sentences: str | list[str],
-        *,
-        normalize_embeddings: bool,
-        convert_to_numpy: bool,
-        show_progress_bar: bool,
-    ) -> object: ...
+    def embed(self, documents: list[str], batch_size: int) -> Iterable[Sequence[float]]: ...
 
 
 _model: _Encoder | None = None
@@ -42,12 +42,30 @@ _model_lock = threading.Lock()
 
 
 def _load_model(model_name: str) -> _Encoder:
-    from sentence_transformers import SentenceTransformer
+    """Load the model with fastembed, which runs ONNX files without PyTorch."""
+    from fastembed import TextEmbedding
+    from fastembed.common.model_description import ModelSource, PoolingType
 
-    return SentenceTransformer(
-        model_name,
-        token=config.HF_TOKEN or None,
+    # fastembed doesn't ship multilingual-e5-small, so register its ONNX file ourselves.
+    # Mean pooling + normalization is how E5 models produce sentence vectors.
+    TextEmbedding.add_custom_model(
+        model=model_name,
+        pooling=PoolingType.MEAN,
+        normalization=True,
+        sources=ModelSource(hf=model_name),
+        dim=_LOCAL_EMBEDDING_DIM,
+        model_file=_LOCAL_ONNX_FILE,
     )
+    return TextEmbedding(model_name)
+
+
+def _embed_locally(texts: list[str]) -> list[list[float]]:
+    try:
+        vectors = get_embedding_model().embed(texts, batch_size=_LOCAL_BATCH_SIZE)
+        return [[float(value) for value in vector] for vector in vectors]
+    except Exception as exc:
+        logger.exception("Local embedding model failed.")
+        raise RuntimeError(_EMBEDDING_UNAVAILABLE) from exc
 
 
 def get_embedding_model() -> _Encoder:
@@ -67,7 +85,7 @@ def get_embedding_model() -> _Encoder:
 
 
 def _uses_hf_api() -> bool:
-    return config.EMBED_PROVIDER != "local"
+    return config.EMBED_PROVIDER == "huggingface"
 
 
 def _normalize(vector: Sequence[float]) -> list[float]:
@@ -143,26 +161,14 @@ def embed_documents(texts: Sequence[str]) -> list[list[float]]:
     prefixed = [f"passage: {text}" for text in texts]
     if _uses_hf_api():
         return _embed_with_hf_api(prefixed)
-    encoded = get_embedding_model().encode(
-        prefixed,
-        normalize_embeddings=True,
-        convert_to_numpy=True,
-        show_progress_bar=False,
-    )
-    return encoded.tolist()
+    return _embed_locally(prefixed)
 
 
 def embed_query(text: str) -> list[float]:
     """Embed a query as one normalized vector, adding the E5 prefix automatically."""
     if _uses_hf_api():
         return _embed_with_hf_api([f"query: {text}"])[0]
-    encoded = get_embedding_model().encode(
-        f"query: {text}",
-        normalize_embeddings=True,
-        convert_to_numpy=True,
-        show_progress_bar=False,
-    )
-    return encoded.tolist()
+    return _embed_locally([f"query: {text}"])[0]
 
 
 def cosine_similarity(first: Sequence[float], second: Sequence[float]) -> float:

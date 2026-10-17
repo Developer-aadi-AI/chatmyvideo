@@ -2,6 +2,7 @@ from app import config
 
 
 def test_check_config_reports_missing_required_keys(monkeypatch, capsys) -> None:
+    monkeypatch.setattr(config, "EMBED_PROVIDER", "huggingface")
     monkeypatch.setattr(config, "GROQ_API_KEY", "")
     monkeypatch.setattr(config, "HF_TOKEN", "")
     monkeypatch.setattr(config, "SUPADATA_API_KEY", "")
@@ -12,6 +13,15 @@ def test_check_config_reports_missing_required_keys(monkeypatch, capsys) -> None
     assert capsys.readouterr().out == (
         "Missing required configuration keys: GROQ_API_KEY, HF_TOKEN, SUPADATA_API_KEY\n"
     )
+
+
+def test_hf_token_is_optional_with_local_embeddings(monkeypatch, capsys) -> None:
+    monkeypatch.setattr(config, "EMBED_PROVIDER", "local")
+    monkeypatch.setattr(config, "GROQ_API_KEY", "test-key")
+    monkeypatch.setattr(config, "HF_TOKEN", "")
+    monkeypatch.setattr(config, "SUPADATA_API_KEY", "test-key")
+
+    assert config.check_config() == []
 
 
 def test_check_config_does_not_print_key_values(monkeypatch, capsys) -> None:

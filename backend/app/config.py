@@ -47,10 +47,11 @@ LLM_MODEL: str = _backend_setting("LLM_MODEL", "openai/gpt-oss-120b")
 # are per model, so this spreads the free-tier token budget across two models.
 LLM_FAST_MODEL: str = _backend_setting("LLM_FAST_MODEL", "openai/gpt-oss-20b")
 EMBED_MODEL: str = _backend_setting("EMBED_MODEL", "intfloat/multilingual-e5-small")
-# "huggingface" calls the HF Inference API (tiny memory, needs an HF_TOKEN with the
-# "Make calls to Inference Providers" permission); "local" runs the model in-process
-# with sentence-transformers, which needs ~1.1 GB RAM.
-EMBED_PROVIDER: str = _backend_setting("EMBED_PROVIDER", "huggingface").lower()
+# "local" runs an int8 ONNX copy of the model in-process with fastembed (~550 MB RAM,
+# free). "huggingface" calls the HF Inference API instead (tiny memory, but it uses
+# paid HF credits and needs an HF_TOKEN with the "Make calls to Inference Providers"
+# permission).
+EMBED_PROVIDER: str = _backend_setting("EMBED_PROVIDER", "local").lower()
 RETRIEVER_K: int = _integer_setting("RETRIEVER_K", 4)
 FULL_CONTEXT_CHAR_LIMIT: int = _integer_setting("FULL_CONTEXT_CHAR_LIMIT", 24000)
 
@@ -61,7 +62,7 @@ def check_config() -> list[str]:
     missing = []
     if not GROQ_API_KEY:
         missing.append("GROQ_API_KEY")
-    if not HF_TOKEN:
+    if not HF_TOKEN and EMBED_PROVIDER == "huggingface":
         missing.append("HF_TOKEN")
     if not SUPADATA_API_KEY:
         missing.append("SUPADATA_API_KEY")

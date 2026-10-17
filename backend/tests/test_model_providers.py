@@ -106,19 +106,13 @@ def test_embedding_model_is_loaded_once_and_reused(monkeypatch) -> None:
     assert len(instances) == 1
 
 
-def test_embedding_helpers_apply_e5_prefix_and_normalize(monkeypatch) -> None:
-    calls: list[tuple[object, dict[str, object]]] = []
-
-    class FakeArray(list):
-        def tolist(self):
-            return list(self)
+def test_embedding_helpers_apply_e5_prefix(monkeypatch) -> None:
+    calls: list[list[str]] = []
 
     class FakeModel:
-        def encode(self, texts, **kwargs):
-            calls.append((texts, kwargs))
-            if isinstance(texts, str):
-                return FakeArray([0.6, 0.8])
-            return FakeArray([FakeArray([0.6, 0.8]) for _ in texts])
+        def embed(self, documents, batch_size):
+            calls.append(documents)
+            return (iter([0.6, 0.8]) for _ in documents)
 
     monkeypatch.setattr(embeddings, "_model", FakeModel())
     monkeypatch.setattr(embeddings, "_model_name", "intfloat/multilingual-e5-large")
@@ -127,12 +121,22 @@ def test_embedding_helpers_apply_e5_prefix_and_normalize(monkeypatch) -> None:
     query = embeddings.embed_query("How do plants grow?")
     passages = embeddings.embed_documents(["Plants use sunlight to grow."])
 
-    assert calls[0][0] == "query: How do plants grow?"
-    assert calls[1][0] == ["passage: Plants use sunlight to grow."]
-    assert all(call[1]["normalize_embeddings"] is True for call in calls)
+    assert calls == [["query: How do plants grow?"], ["passage: Plants use sunlight to grow."]]
     assert query == [0.6, 0.8]
     assert passages == [[0.6, 0.8]]
     assert embeddings.cosine_similarity(query, passages[0]) == pytest.approx(1.0)
+
+
+def test_local_model_failure_is_a_friendly_runtime_error(monkeypatch) -> None:
+    class BrokenModel:
+        def embed(self, documents, batch_size):
+            raise OSError("model file missing")
+
+    monkeypatch.setattr(embeddings, "_model", BrokenModel())
+    monkeypatch.setattr(embeddings, "_model_name", config.EMBED_MODEL)
+
+    with pytest.raises(RuntimeError, match="temporarily unavailable"):
+        embeddings.embed_documents(["text"])
 
 
 def test_empty_document_list_does_not_load_model() -> None:

@@ -20,7 +20,7 @@ It only uses captions the video already has (manual or auto-generated). It never
 ## How it works
 
 1. You paste a link. The backend works out the video ID and fetches the captions through [Supadata](https://supadata.ai).
-2. The transcript is split into overlapping chunks of about 850 characters, embedded with `multilingual-e5-small` (through the Hugging Face Inference API), and put into an in-memory FAISS index.
+2. The transcript is split into overlapping chunks of about 850 characters, embedded with `multilingual-e5-small` (an int8 copy run inside the backend with [fastembed](https://github.com/qdrant/fastembed)), and put into an in-memory FAISS index.
 3. When you ask something:
    - **Short videos (≤10 min):** the whole transcript goes to the model.
    - **Long videos:** it searches for the most relevant chunks. For summaries, notes and flashcards it summarises each 5-minute section and then combines those summaries.
@@ -34,22 +34,23 @@ It only uses captions the video already has (manual or auto-generated). It never
 | Backend | Python 3.12, FastAPI, Pydantic. Hosted on Railway |
 | LLM | Groq free tier: `openai/gpt-oss-120b` and `openai/gpt-oss-20b` |
 | Transcripts | Supadata API (existing captions only) |
-| Embeddings | `intfloat/multilingual-e5-small` via Hugging Face |
+| Embeddings | `intfloat/multilingual-e5-small`, run locally with fastembed (ONNX, int8) |
 | Search | FAISS, kept in memory |
 
 ## Running it locally
 
-You'll need Python 3.12, Node.js with `pnpm` (or `corepack`), and three free API keys:
+You'll need Python 3.12, Node.js with `pnpm` (or `corepack`), and two free API keys:
 
 - **Groq**: https://console.groq.com/keys
 - **Supadata**: https://supadata.ai
-- **Hugging Face**: https://huggingface.co/settings/tokens. Make a *fine-grained* token and tick **"Make calls to Inference Providers"**. A plain read token won't work.
+
+The first video you load downloads the embedding model (about 130 MB) from Hugging Face, so it takes a little longer.
 
 ### 1. Backend
 
 ```bash
 cd backend
-cp ../.env.example .env      # then fill in your three keys
+cp ../.env.example .env      # then fill in your two keys
 uv sync
 uv run fastapi dev app/main.py
 ```
@@ -70,16 +71,16 @@ Open http://localhost:3000. The frontend expects the backend at `http://localhos
 
 ### Settings
 
-These all live in `backend/.env`. Only the three keys are required.
+These all live in `backend/.env`. Only the two keys are required.
 
 | Variable | Default | What it's for |
 |---|---|---|
 | `GROQ_API_KEY` | | Required |
 | `SUPADATA_API_KEY` | | Required |
-| `HF_TOKEN` | | Required (needs the Inference Providers permission) |
+| `HF_TOKEN` | | Only needed with `EMBED_PROVIDER=huggingface` (needs the "Make calls to Inference Providers" permission) |
 | `LLM_MODEL` | `openai/gpt-oss-120b` | Model for the answers you see |
 | `LLM_FAST_MODEL` | `openai/gpt-oss-20b` | Model for section summaries and follow-up rewrites |
-| `EMBED_PROVIDER` | `huggingface` | Set to `local` to run the embedding model on your machine (needs ~1.1 GB RAM) |
+| `EMBED_PROVIDER` | `local` | `local` runs the embedding model inside the backend (free, ~550 MB RAM). `huggingface` uses the HF Inference API, which spends paid HF credits |
 | `EMBED_MODEL` | `intfloat/multilingual-e5-small` | Embedding model |
 | `RETRIEVER_K` | `4` | How many transcript chunks to search with on long videos |
 | `FULL_CONTEXT_CHAR_LIMIT` | `24000` | Short videos over this many characters fall back to search |
@@ -94,13 +95,13 @@ I deploy straight from GitHub, so every push to `main` redeploys both parts.
 **Backend on Railway**
 - Root directory: `backend`
 - Start command: `python -m pip install -r requirements.txt && python -m uvicorn app.main:app --host 0.0.0.0 --port $PORT`
-- Variables: your three keys, plus `FRONTEND_ORIGIN=https://your-app.vercel.app`
+- Variables: your two keys, plus `FRONTEND_ORIGIN=https://your-app.vercel.app`
 
 **Frontend on Vercel**
 - Root directory: `frontend`
 - Variable: `NEXT_PUBLIC_API_URL=https://your-backend.up.railway.app` (no trailing slash). Redeploy after changing it.
 
-A note on memory: the default setup uses about 70 MB, because embeddings come from Hugging Face's API. Running the embedding model inside the server (`EMBED_PROVIDER=local`) needs over 1 GB, which crashed my Railway instance on any normal-length video.
+A note on memory: the backend peaks at roughly 600 MB while indexing a video. It uses an int8-quantized ONNX copy of the embedding model and embeds in small batches. The full-size model with PyTorch (`sentence-transformers`) needed over 1 GB and crashed my Railway instance. Calling Hugging Face's API (`EMBED_PROVIDER=huggingface`) uses almost no memory, but its free credits ran out quickly.
 
 ## Tests
 
@@ -139,7 +140,7 @@ backend/
     agent/             question answering, language handling, prompts
     ingest/            URL parsing, chunking, search
     transcripts/       Supadata caption fetching
-    embeddings/        Hugging Face / local embeddings
+    embeddings/        local (fastembed) / Hugging Face embeddings
     llm/               Groq client
     config.py          settings from .env
   tests/
