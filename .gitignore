@@ -19,3 +19,4 @@ backend/eval-results/
 .railway/
 
 *.tsbuildinfo
+CLAUDE.md

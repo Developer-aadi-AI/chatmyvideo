@@ -1,176 +1,150 @@
 # ChatMyVideo
 
-ChatMyVideo turns a YouTube video's transcript into a searchable study companion. The backend can fetch timestamped existing captions through Supadata; end-to-end video ingestion and chat are still in progress.
+Paste a YouTube link, then ask the video questions. You get short answers with timestamps you can click, a one-click summary, and flashcards for revision.
 
-## Local development
+**Try it:** https://chatmyvideo.vercel.app
 
-### Configuration and secrets
+I built this because I kept scrubbing back and forth through long lectures and talks looking for the one bit I needed. Now I ask the video instead, and every answer tells me where in the video it came from. Click a timestamp and the player jumps there.
 
-Copy `.env.example` to `.env` and fill in the required API credentials. The `.env` file is ignored by Git. `backend/app/config.py` loads it once and provides typed settings to the backend; it also uses `backend/.env` as a fallback location for `SUPADATA_API_KEY`. The API keys are required; the optional model and retrieval settings default to the values shown in the config. Run `check_config()` from `app.config` to list any missing required keys without displaying their values.
+## What it does
 
-### Backend
+- **Ask questions about any captioned YouTube video.** Answers come only from what's said in the video. If the video doesn't cover something, it says so instead of making things up.
+- **Clickable timestamps.** Every answer cites moments like `[03:12]`. Clicking one seeks the embedded player and starts playing from there.
+- **Summary and Flashcards buttons.** One click gives you a short bullet summary or 8 flashcards in a table.
+- **Pick your answer language.** English by default, or Hindi, Hinglish, Urdu, Tamil, Spanish and about 15 more. There's also an option to answer in the video's own language.
+- **Follow-up questions work.** The last few messages are sent along, so "what did he say after that?" makes sense.
+- **Works with long videos.** For anything over 10 minutes it summarises the video section by section first, so summaries and flashcards cover the whole thing, not only the first few minutes.
 
-```powershell
+It only uses captions the video already has (manual or auto-generated). It never downloads the video or audio, and it can't see what's on screen.
+
+## How it works
+
+1. You paste a link. The backend works out the video ID and fetches the captions through [Supadata](https://supadata.ai).
+2. The transcript is split into overlapping chunks of about 850 characters, embedded with `multilingual-e5-small` (through the Hugging Face Inference API), and put into an in-memory FAISS index.
+3. When you ask something:
+   - **Short videos (≤10 min):** the whole transcript goes to the model.
+   - **Long videos:** it searches for the most relevant chunks. For summaries, notes and flashcards it summarises each 5-minute section and then combines those summaries.
+4. The answer comes from Groq (`gpt-oss-120b` for answers, `gpt-oss-20b` for background steps). Before it reaches you, every timestamp is checked against the parts of the transcript the model actually saw. Anything that doesn't match is removed.
+
+## Tech stack
+
+| Part | What I used |
+|---|---|
+| Frontend | Next.js 15, React 19, TypeScript, Tailwind CSS. Hosted on Vercel |
+| Backend | Python 3.12, FastAPI, Pydantic. Hosted on Railway |
+| LLM | Groq free tier: `openai/gpt-oss-120b` and `openai/gpt-oss-20b` |
+| Transcripts | Supadata API (existing captions only) |
+| Embeddings | `intfloat/multilingual-e5-small` via Hugging Face |
+| Search | FAISS, kept in memory |
+
+## Running it locally
+
+You'll need Python 3.12, Node.js with `pnpm` (or `corepack`), and three free API keys:
+
+- **Groq**: https://console.groq.com/keys
+- **Supadata**: https://supadata.ai
+- **Hugging Face**: https://huggingface.co/settings/tokens. Make a *fine-grained* token and tick **"Make calls to Inference Providers"**. A plain read token won't work.
+
+### 1. Backend
+
+```bash
 cd backend
+cp ../.env.example .env      # then fill in your three keys
 uv sync
 uv run fastapi dev app/main.py
 ```
 
-The health endpoint is available at `http://localhost:8000/health`.
+The API runs on http://localhost:8000. Check http://localhost:8000/health and it should say `{"status":"ok"}`.
 
-The `GET /transcript?url=<youtube-url>` endpoint returns the transcript language,
-duration in seconds, and timestamped segments with `text`, `start`, and `end`
-times in seconds. Supadata is called in native mode, so it only uses existing
-captions and does not generate an AI transcript. Successful results and
-failures are cached in memory for the lifetime of the backend process so a
-video is not requested repeatedly during that run.
+If you don't use `uv`, `pip install -r requirements.txt` and `uvicorn app.main:app --reload` also work.
 
-Groq chat completions use a process-wide client with a 30-second timeout, two
-retries, and temperature `0.2`. The configured `EMBED_MODEL` is loaded once per
-process and shared by document and query embedding helpers. E5 helpers apply
-`passage: ` and `query: ` prefixes automatically and return normalized vectors.
-The default model is `intfloat/multilingual-e5-small`. By default
-(`EMBED_PROVIDER=huggingface`) embeddings come from the Hugging Face Inference
-API, so the backend needs only ~70 MB of RAM; `HF_TOKEN` must be a token with
-the "Make calls to Inference Providers" permission. Set `EMBED_PROVIDER=local`
-to run the model in-process instead (needs ~1.1 GB of RAM). Restart the backend after changing the model setting.
+### 2. Frontend
 
-Groq completions require the video's transcript language and automatically add
-an answer-language instruction based on the latest user question. Stable
-script and keyword rules detect supported languages; short or ambiguous
-questions fall back to the transcript language, and romanized Hindi is treated
-as Hinglish rather than another Latin-script language.
-
-Timestamped transcript segments can be grouped for search with
-`app.ingest.chunking.chunk_transcript`. It targets 850 characters with roughly
-150 characters of whole-segment overlap. Each chunk has plain text without
-timestamps, start/end times in seconds, an ordered `position`, video ID, and
-language.
-
-Videos can be indexed once per backend process with `POST /videos/index` and
-searched with `GET /videos/{video_id}/search?question=...`. Chunks are embedded
-into an in-memory FAISS inner-product index; normalized embeddings make its
-scores cosine similarities. Search filters near-duplicate chunks, then returns
-the remaining matches in their original video order, including start/end
-timestamps. Indexing logs the number of chunks and elapsed time. Restarting the
-backend clears these in-memory indexes.
-
-Ask questions about an indexed video with
-`POST /videos/{video_id}/ask` and JSON `{"question": "...", "limit": 5}`.
-Answers are grounded only in the retrieved timestamped excerpts; transcript
-text is treated as untrusted content, and citations are retained only when
-their timestamps match an excerpt supplied to the model. The response includes
-the answer, cited times, and source excerpts for clickable timestamp UI.
-For follow-ups, include a `history` array of recent `{"role": "user"|"assistant",
-"content": "..."}` messages in the request. The service uses at most its last
-six short messages to rewrite the follow-up for search, but answers the original
-wording; it stores no conversation history itself. First questions skip the
-rewrite call.
-
-For videos up to 10 minutes, answers use the entire timestamped transcript
-rather than only top search results. On longer videos, overview requests such
-as summaries, main points, or notes (including supported Hindi/Hinglish
-phrasing) are handled by summarizing timestamped sections and synthesizing
-those summaries. Section summaries are cached in memory for the backend
-process, so later overview questions reuse them. These paths preserve the same
-answer-language and citation validation rules as regular Q&A.
-
-The framework-independent engine in `app.engine` exposes `load_video(link)` and
-`ask(question, history=None)`. `load_video` returns the video ID, transcript
-language, duration, and whether it was newly indexed. `ask` returns the answer,
-cited timestamps, and source excerpts. Engine failures are raised as
-`EngineError` with a user-friendly message; detailed exceptions are logged.
-Questions must contain text and be no longer than 2,000 characters.
-
-Start an interactive terminal chat from the backend directory:
-
-```powershell
-uv run python -m app.chat
-```
-
-Paste a YouTube link, then ask questions and follow-ups. Type `quit` or `exit`
-to end the conversation.
-
-### Engine evaluation
-
-The backend includes a small, editable evaluation set at
-`backend/evals/engine_eval.json`: a short English tutorial, long English talk,
-Hindi video, and a video expected to have only auto-generated captions, each
-with three on-topic questions and one off-topic refusal check. Fill in each
-video's `url` and, for every on-topic question, `expected_points`,
-`expected_answer`, and approximate `expected_time_seconds` before running it.
-The template is intentionally blank so no example link consumes transcript
-credits.
-
-From `backend`, run one video at a time (recommended to limit transcript/model
-usage):
-
-```powershell
-uv run python -m app.evaluate_engine --video tutorial-en
-```
-
-Available IDs are `tutorial-en`, `talk-en`, `hindi-video`, and
-`auto-captions`. To run the entire configured set, use `--all` explicitly.
-The tool reports per-question off-topic refusal, whether a citation is within
-20 seconds of the expected time, LLM-judged expected-point coverage, and answer
-latency. Each run is appended as one JSON line to the ignored local file
-`backend/eval-results/runs.jsonl`; compare these records across runs, or select
-a different location with `--results <path>`. Use `--dataset <path>` to run a
-copied or revised dataset.
-
-To fetch a transcript from the terminal and print its language, segment count,
-duration, and first five timestamped segments:
-
-```powershell
-cd backend
-uv run python -m app.transcripts.youtube_transcript "https://www.youtube.com/watch?v=dQw4w9WgXcQ"
-```
-
-To confirm the model clients load only once and check question/passage similarity:
-
-```powershell
-cd backend
-uv run python -m app.check_models
-```
-
-### Frontend
-
-```powershell
+```bash
 cd frontend
-corepack pnpm install
-corepack pnpm dev
+pnpm install
+pnpm dev
 ```
 
-Open `http://localhost:3000`, paste a YouTube link, and ask questions with
-follow-ups. Set `NEXT_PUBLIC_API_URL` in `frontend/.env.local` to the backend
-base URL if it is not `http://localhost:8000`. For Vercel, configure
-`NEXT_PUBLIC_API_URL` in the project's environment variables to the deployed
-backend URL (without a trailing slash), and redeploy the frontend. The frontend
-does not fall back to localhost in production. Set the backend's
-`FRONTEND_ORIGIN` to `https://chatmyvideo.vercel.app` (or your Vercel domain)
-to allow browser requests from the deployed app.
+Open http://localhost:3000. The frontend expects the backend at `http://localhost:8000` unless you set `NEXT_PUBLIC_API_URL` in `frontend/.env.local`.
 
-## Tests and checks
+### Settings
 
-```powershell
+These all live in `backend/.env`. Only the three keys are required.
+
+| Variable | Default | What it's for |
+|---|---|---|
+| `GROQ_API_KEY` | | Required |
+| `SUPADATA_API_KEY` | | Required |
+| `HF_TOKEN` | | Required (needs the Inference Providers permission) |
+| `LLM_MODEL` | `openai/gpt-oss-120b` | Model for the answers you see |
+| `LLM_FAST_MODEL` | `openai/gpt-oss-20b` | Model for section summaries and follow-up rewrites |
+| `EMBED_PROVIDER` | `huggingface` | Set to `local` to run the embedding model on your machine (needs ~1.1 GB RAM) |
+| `EMBED_MODEL` | `intfloat/multilingual-e5-small` | Embedding model |
+| `RETRIEVER_K` | `4` | How many transcript chunks to search with on long videos |
+| `FULL_CONTEXT_CHAR_LIMIT` | `24000` | Short videos over this many characters fall back to search |
+| `FRONTEND_ORIGIN` | `http://localhost:3000` | Your frontend URL, for CORS |
+
+Never put any of these keys in the frontend. The only thing the frontend needs is `NEXT_PUBLIC_API_URL`.
+
+## Deploying
+
+I deploy straight from GitHub, so every push to `main` redeploys both parts.
+
+**Backend on Railway**
+- Root directory: `backend`
+- Start command: `python -m pip install -r requirements.txt && python -m uvicorn app.main:app --host 0.0.0.0 --port $PORT`
+- Variables: your three keys, plus `FRONTEND_ORIGIN=https://your-app.vercel.app`
+
+**Frontend on Vercel**
+- Root directory: `frontend`
+- Variable: `NEXT_PUBLIC_API_URL=https://your-backend.up.railway.app` (no trailing slash). Redeploy after changing it.
+
+A note on memory: the default setup uses about 70 MB, because embeddings come from Hugging Face's API. Running the embedding model inside the server (`EMBED_PROVIDER=local`) needs over 1 GB, which crashed my Railway instance on any normal-length video.
+
+## Tests
+
+```bash
 cd backend
-uv run pytest
+uv run pytest            # about 175 tests, no API keys needed
 uv run ruff check .
+
+cd ../frontend
+pnpm lint
+pnpm build
 ```
 
-```powershell
-cd frontend
-corepack pnpm lint
-corepack pnpm build
+There are also a few handy scripts in `backend`:
+
+- `uv run python -m app.chat` lets you chat with a video in the terminal.
+- `uv run python -m app.transcripts.youtube_transcript "<youtube-url>"` prints a video's transcript.
+- `uv run python -m app.evaluate_engine --video talk-en` runs the small eval set in `backend/evals/engine_eval.json`. Fill in the video URLs and expected answers first.
+
+## Limitations
+
+This is a student project and still a work in progress, so a few things to know:
+
+- **Nothing is saved yet.** Loaded videos and cached summaries live in memory and disappear when the backend restarts or redeploys. You just load the video again.
+- **The first summary of a long video is slow**, roughly 10–30 seconds, because it summarises every section first. After that it's quick.
+- **Groq's free tier is limited** to about 8,000 tokens a minute per model. If lots of people use it at once you may see "The answer service is busy"; wait a few seconds and try again.
+- **No captions, no answers.** Videos without any captions show an error.
+- **No accounts, library or usage limits yet.** Sign-in with Supabase, a saved library and per-user limits are next on the list.
+
+## Project layout
+
 ```
-
-## Initial deployment
-
-Push this project to a GitHub repository, then create two services connected to that repository:
-
-1. **Railway backend:** set the service root directory to `backend`, use `python -m pip install "fastapi[standard]>=0.115,<1"` as the build command, and use `python -m pip install -r requirements.txt && python -m uvicorn app.main:app --host 0.0.0.0 --port $PORT` as the start command. Set `FRONTEND_ORIGIN` to the deployed Vercel origin (for example, `https://your-app.vercel.app`) and set the service's `PORT` variable to match the target port configured for its Railway domain.
-2. **Vercel frontend:** set the project root directory to `frontend`. Set `NEXT_PUBLIC_API_URL` to the Railway public URL, without a trailing slash, and deploy. Redeploy the frontend after changing this variable.
-
-Once both services are deployed, open the Vercel URL and confirm the API status indicator reports that the backend is online. The frontend checks `GET /health`; transcript fetching is currently available through the backend API and terminal command.
-
-Do not put secret keys in frontend environment variables. Only variables prefixed with `NEXT_PUBLIC_` should be exposed to the browser.
+backend/
+  app/
+    main.py            API routes
+    agent/             question answering, language handling, prompts
+    ingest/            URL parsing, chunking, search
+    transcripts/       Supadata caption fetching
+    embeddings/        Hugging Face / local embeddings
+    llm/               Groq client
+    config.py          settings from .env
+  tests/
+  evals/
+frontend/
+  app/                 Next.js pages
+  components/          Markdown renderer, timestamp buttons
+```
